@@ -1,0 +1,63 @@
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  application:
+    name: pokemon-service
+
+  # Configuración de Base de Datos
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require}
+    username: ${DB_USERNAME:postgres.wgckznwgamfiadgtvyds}
+    password: ${DB_PASSWORD:}
+    driver-class-name: ${DB_DRIVER:org.postgresql.Driver}
+
+  # Configuración de JPA/Hibernate
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        use_sql_comments: true
+        jdbc:
+          batch_size: 20
+          fetch_size: 50
+        order_inserts: true
+        order_updates: true
+    show-sql: false
+    open-in-view: false
+
+  # Configuración de Jackson (JSON)
+  jackson:
+    serialization:
+      indent-output: true
+    time-zone: UTC
+    default-property-inclusion: non_null
+
+# Configuración de Logging
+logging:
+  level:
+    root: INFO
+    com.pokemon: DEBUG
+    org.springframework.web: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+# Configuración del servidor
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /
+
+# Configuración de Swagger/OpenAPI
+springdoc:
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
