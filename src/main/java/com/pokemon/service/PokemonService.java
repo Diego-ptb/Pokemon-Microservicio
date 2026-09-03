@@ -63,6 +63,21 @@ public class PokemonService {
     }
 
     /**
+     * Obtiene un Pokémon por nombre, ignorando mayúsculas/minúsculas.
+     *
+     * @param name Nombre del Pokémon
+     * @return PokemonResponseDto
+     * @throws ResourceNotFoundException si el Pokémon no existe
+     */
+    public PokemonResponseDto getPokemonByName(String name) {
+        log.info("Obteniendo Pokémon por nombre: {}", name);
+        return pokemonRepository.findByNameIgnoreCase(name)
+                .map(this::convertToResponseDto)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Pokémon no encontrado con nombre: " + name));
+    }
+
+    /**
      * Crea un nuevo Pokémon.
      *
      * @param createDto Datos del Pokémon a crear

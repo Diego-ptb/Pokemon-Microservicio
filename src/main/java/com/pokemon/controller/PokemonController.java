@@ -76,6 +76,25 @@ public class PokemonController {
     }
 
     /**
+     * GET /api/pokemons/name/{name}
+     * Obtiene un Pokémon por nombre.
+     *
+     * @param name Nombre del Pokémon
+     * @return Pokémon encontrado (200 OK) o 404 Not Found
+     */
+    @GetMapping("/name/{name}")
+    @Operation(summary = "Obtener Pokémon por nombre", description = "Devuelve un Pokémon específico mediante su nombre, ignorando mayúsculas/minúsculas")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Pokémon encontrado", content = @Content(schema = @Schema(implementation = PokemonResponseDto.class))),
+            @ApiResponse(responseCode = "404", description = "Pokémon no encontrado")
+    })
+    public ResponseEntity<PokemonResponseDto> getPokemonByName(
+            @Parameter(description = "Nombre del Pokémon", required = true, example = "pikachu") @PathVariable String name) {
+        PokemonResponseDto pokemon = pokemonService.getPokemonByName(name);
+        return ResponseEntity.ok(pokemon);
+    }
+
+    /**
      * POST /api/pokemons
      * Crea un nuevo Pokémon.
      *
