@@ -164,6 +164,36 @@ class PokemonServiceTest {
         verify(pokemonRepository, times(1)).findById(999L);
     }
 
+    @Test
+    @DisplayName("Obtener Pokémon por nombre exitosamente")
+    void testGetPokemonByName() {
+        // Arrange
+        when(pokemonRepository.findByNameIgnoreCase("pikachu")).thenReturn(Optional.of(testPokemon));
+
+        // Act
+        PokemonResponseDto result = pokemonService.getPokemonByName("pikachu");
+
+        // Assert
+        assertNotNull(result);
+        assertEquals("Pikachu", result.getName());
+        verify(pokemonRepository, times(1)).findByNameIgnoreCase("pikachu");
+    }
+
+    @Test
+    @DisplayName("Obtener Pokémon por nombre no encontrado lanza excepción")
+    void testGetPokemonByNameNotFound() {
+        // Arrange
+        when(pokemonRepository.findByNameIgnoreCase("mewtwo")).thenReturn(Optional.empty());
+
+        // Act & Assert
+        ResourceNotFoundException exception = assertThrows(
+                ResourceNotFoundException.class,
+                () -> pokemonService.getPokemonByName("mewtwo"));
+
+        assertTrue(exception.getMessage().contains("mewtwo"));
+        verify(pokemonRepository, times(1)).findByNameIgnoreCase("mewtwo");
+    }
+
     // ============================================
     // Tests para UPDATE
     // ============================================
