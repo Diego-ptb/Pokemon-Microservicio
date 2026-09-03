@@ -63,6 +63,21 @@ public class PokemonService {
     }
 
     /**
+     * Obtiene un Pokémon por nombre, ignorando mayúsculas/minúsculas.
+     *
+     * @param name Nombre del Pokémon
+     * @return PokemonResponseDto
+     * @throws ResourceNotFoundException si el Pokémon no existe
+     */
+    public PokemonResponseDto getPokemonByName(String name) {
+        log.info("Obteniendo Pokémon por nombre: {}", name);
+        return pokemonRepository.findByNameIgnoreCase(name)
+                .map(this::convertToResponseDto)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Pokémon no encontrado con nombre: " + name));
+    }
+
+    /**
      * Crea un nuevo Pokémon.
      *
      * @param createDto Datos del Pokémon a crear
@@ -141,6 +156,24 @@ public class PokemonService {
 
         pokemonRepository.deleteById(id);
         log.info("Pokémon eliminado exitosamente con ID: {}", id);
+    }
+
+    /**
+     * Elimina un Pokémon por nombre, ignorando mayúsculas/minúsculas.
+     *
+     * @param name Nombre del Pokémon a eliminar
+     * @throws ResourceNotFoundException si el Pokémon no existe
+     */
+    @Transactional
+    public void deletePokemonByName(String name) {
+        log.info("Eliminando Pokémon por nombre: {}", name);
+
+        Pokemon pokemon = pokemonRepository.findByNameIgnoreCase(name)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Pokémon no encontrado con nombre: " + name));
+
+        pokemonRepository.delete(pokemon);
+        log.info("Pokémon eliminado exitosamente con nombre: {}", name);
     }
 
     /**
