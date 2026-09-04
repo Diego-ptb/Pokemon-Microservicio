@@ -291,7 +291,7 @@ public class PokemonController {
          * @return Sin contenido (204 No Content) o 404 Not Found
          */
 
-        @DeleteMapping("/name/{name")
+        @DeleteMapping("/name/{name}")
 
         @DeleteMapping("/name/{name}")
 
