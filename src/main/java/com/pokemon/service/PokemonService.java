@@ -159,6 +159,24 @@ public class PokemonService {
     }
 
     /**
+     * Elimina un Pokémon por nombre, ignorando mayúsculas/minúsculas.
+     *
+     * @param name Nombre del Pokémon a eliminar
+     * @throws ResourceNotFoundException si el Pokémon no existe
+     */
+    @Transactional
+    public void deletePokemonByName(String name) {
+        log.info("Eliminando Pokémon por nombre: {}", name);
+
+        Pokemon pokemon = pokemonRepository.findByNameIgnoreCase(name)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Pokémon no encontrado con nombre: " + name));
+
+        pokemonRepository.delete(pokemon);
+        log.info("Pokémon eliminado exitosamente con nombre: {}", name);
+    }
+
+    /**
      * Convierte una Entity Pokemon a PokemonResponseDto.
      *
      * @param pokemon Entity a convertir
