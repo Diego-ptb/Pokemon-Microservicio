@@ -75,6 +75,7 @@ public class PokemonController {
                 return ResponseEntity.ok(pokemon);
         }
 
+
         /**
          * GET /api/pokemons/name/{name}
          * Obtiene un Pokémon por nombre.
@@ -94,6 +95,43 @@ public class PokemonController {
                 return ResponseEntity.ok(pokemon);
         }
 
+    /**
+     * GET /api/pokemons/name/{name}
+     * Obtiene un Pokémon por nombre.
+     *
+     * @param name Nombre del Pokémon
+     * @return Pokémon encontrado (200 OK) o 404 Not Found
+     */
+    @GetMapping("/name/{name}")
+    @Operation(summary = "Obtener Pokémon por nombre", description = "Devuelve un Pokémon específico mediante su nombre, ignorando mayúsculas/minúsculas")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Pokémon encontrado", content = @Content(schema = @Schema(implementation = PokemonResponseDto.class))),
+            @ApiResponse(responseCode = "404", description = "Pokémon no encontrado")
+    })
+    public ResponseEntity<PokemonResponseDto> getPokemonByName(
+            @Parameter(description = "Nombre del Pokémon", required = true, example = "pikachu") @PathVariable String name) {
+        PokemonResponseDto pokemon = pokemonService.getPokemonByName(name);
+        return ResponseEntity.ok(pokemon);
+    }
+
+    /**
+     * POST /api/pokemons
+     * Crea un nuevo Pokémon.
+     *
+     * @param createDto Datos del Pokémon a crear
+     * @return Pokémon creado (201 Created)
+     */
+    @PostMapping
+    @Operation(summary = "Crear nuevo Pokémon", description = "Crea un nuevo Pokémon con los datos proporcionados")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "201", description = "Pokémon creado exitosamente", content = @Content(schema = @Schema(implementation = PokemonResponseDto.class))),
+            @ApiResponse(responseCode = "400", description = "Datos inválidos o incompletos")
+    })
+    public ResponseEntity<PokemonResponseDto> createPokemon(
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(description = "Datos del Pokémon a crear", required = true, content = @Content(schema = @Schema(implementation = CreatePokemonDto.class))) @Valid @RequestBody CreatePokemonDto createDto) {
+        PokemonResponseDto created = pokemonService.createPokemon(createDto);
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
         /**
          * POST /api/pokemons
          * Crea un nuevo Pokémon.
