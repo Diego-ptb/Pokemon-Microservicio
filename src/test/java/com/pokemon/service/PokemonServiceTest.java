@@ -87,6 +87,33 @@ class PokemonServiceTest {
         verify(pokemonRepository, times(1)).save(any(Pokemon.class));
     }
 
+    @Test
+    @DisplayName("Crear un Pokémon sin level usa valor por defecto")
+    void testCreatePokemonWithoutLevelUsesDefault() {
+        // Arrange
+        CreatePokemonDto dtoWithoutLevel = new CreatePokemonDto();
+        dtoWithoutLevel.setName("Bulbasaur");
+        dtoWithoutLevel.setType("Planta");
+        dtoWithoutLevel.setDescription("Semilla");
+
+        Pokemon savedPokemon = new Pokemon();
+        savedPokemon.setId(2L);
+        savedPokemon.setName("Bulbasaur");
+        savedPokemon.setType("Planta");
+        savedPokemon.setLevel(1);
+        savedPokemon.setDescription("Semilla");
+
+        when(pokemonRepository.save(any(Pokemon.class))).thenReturn(savedPokemon);
+
+        // Act
+        PokemonResponseDto result = pokemonService.createPokemon(dtoWithoutLevel);
+
+        // Assert
+        assertNotNull(result);
+        assertEquals(1, result.getLevel());
+        verify(pokemonRepository, times(1)).save(any(Pokemon.class));
+    }
+
     // ============================================
     // Tests para READ ALL
     // ============================================
@@ -269,6 +296,36 @@ class PokemonServiceTest {
         assertTrue(exception.getMessage().contains("999"));
         verify(pokemonRepository, times(1)).existsById(999L);
         verify(pokemonRepository, never()).deleteById(any());
+    }
+
+    @Test
+    @DisplayName("Eliminar un Pokémon por nombre exitosamente")
+    void testDeletePokemonByName() {
+        // Arrange
+        when(pokemonRepository.findByNameIgnoreCase("pikachu")).thenReturn(Optional.of(testPokemon));
+
+        // Act
+        pokemonService.deletePokemonByName("pikachu");
+
+        // Assert
+        verify(pokemonRepository, times(1)).findByNameIgnoreCase("pikachu");
+        verify(pokemonRepository, times(1)).delete(testPokemon);
+    }
+
+    @Test
+    @DisplayName("Eliminar Pokémon por nombre no encontrado lanza excepción")
+    void testDeletePokemonByNameNotFound() {
+        // Arrange
+        when(pokemonRepository.findByNameIgnoreCase("mewtwo")).thenReturn(Optional.empty());
+
+        // Act & Assert
+        ResourceNotFoundException exception = assertThrows(
+                ResourceNotFoundException.class,
+                () -> pokemonService.deletePokemonByName("mewtwo"));
+
+        assertTrue(exception.getMessage().contains("mewtwo"));
+        verify(pokemonRepository, times(1)).findByNameIgnoreCase("mewtwo");
+        verify(pokemonRepository, never()).delete(any(Pokemon.class));
     }
 
 }
