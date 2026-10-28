@@ -1,0 +1,349 @@
+# =====================================================================
+# Pipeline CI/CD — pokemon-service
+#
+#  push / PR ─► 1. Build + pruebas (JUnit + JaCoCo ≥ 80%)          [IE2]
+#            ─► 2. Análisis de código SonarCloud (quality gate)     [IE3]
+#            ─► 3. Revisión de dependencias (solo PR)               [IE3]
+#                     │  (si cualquiera falla, el pipeline se detiene)
+#                     ▼
+#               4. Imagen Docker: lint + build + escaneo Grype       [IE1][IE3]
+#                  + publicación en GHCR con tag del commit         [IE4]
+#                     ▼
+#               5. Despliegue automático (Docker Compose) + smoke    [IE4][IE5]
+#                  develop ─► staging      main ─► production
+# =====================================================================
+name: CI/CD Pokemon Service
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+# Mínimo privilegio por defecto; cada job pide solo lo que necesita
+permissions:
+  contents: read
+
+# En PR se cancela la ejecución anterior; en main/develop nunca se corta un despliegue
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  JAVA_VERSION: "21"
+  JAVA_DISTRIBUTION: temurin
+
+jobs:
+  # -------------------------------------------------------------------
+  # 1. Compilación y pruebas unitarias con política de cobertura
+  # -------------------------------------------------------------------
+  build-test:
+    name: 1 · Build y pruebas unitarias
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v5
+
+      - name: Instalar JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v5
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: maven
+
+      # verify = compila + ejecuta JUnit + genera reporte JaCoCo + jacoco:check
+      # (falla si la cobertura de líneas baja del mínimo definido en pom.xml)
+      - name: Compilar, probar y verificar cobertura
+        run: mvn -B -ntp verify
+
+      - name: Resumen de pruebas y cobertura
+        if: always()
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import csv, glob, xml.etree.ElementTree as ET
+          t = f = e = s = 0
+          for path in glob.glob("target/surefire-reports/TEST-*.xml"):
+              r = ET.parse(path).getroot()
+              t += int(r.get("tests", 0)); f += int(r.get("failures", 0))
+              e += int(r.get("errors", 0)); s += int(r.get("skipped", 0))
+          print("## Pruebas unitarias")
+          print(f"| Total | Exitosas | Fallidas | Errores | Omitidas |\n|---|---|---|---|---|")
+          print(f"| {t} | {t-f-e-s} | {f} | {e} | {s} |")
+          try:
+              rows = list(csv.DictReader(open("target/site/jacoco/jacoco.csv")))
+              lm = sum(int(r["LINE_MISSED"]) for r in rows); lc = sum(int(r["LINE_COVERED"]) for r in rows)
+              bm = sum(int(r["BRANCH_MISSED"]) for r in rows); bc = sum(int(r["BRANCH_COVERED"]) for r in rows)
+              print("\n## Cobertura (JaCoCo)")
+              print(f"- Líneas: **{100*lc/max(lc+lm,1):.1f}%** (mínimo exigido: 80%)")
+              print(f"- Ramas: **{100*bc/max(bc+bm,1):.1f}%**")
+          except FileNotFoundError:
+              print("\n_No se generó reporte de cobertura._")
+          EOF
+
+      - name: Publicar reportes de pruebas y cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ github.sha }}
+          path: |
+            target/surefire-reports/
+            target/site/jacoco/
+          retention-days: 30
+
+      - name: Publicar JAR compilado (artefacto trazable al commit)
+        uses: actions/upload-artifact@v4
+        with:
+          name: pokemon-service-jar-${{ github.sha }}
+          path: target/*.jar
+          retention-days: 30
+
+  # -------------------------------------------------------------------
+  # 2. Análisis estático de código y seguridad con SonarCloud
+  #    -Dsonar.qualitygate.wait=true hace que el job FALLE si el
+  #    Quality Gate no pasa (bugs, vulnerabilidades, hotspots, cobertura)
+  # -------------------------------------------------------------------
+  sonar:
+    name: 2 · Análisis SonarCloud (Quality Gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Los PR desde forks y los de Dependabot no reciben secretos, así que no se
+    # pueden analizar aquí; se analizan al hacer merge a develop/main (push).
+    if: >-
+      github.actor != 'dependabot[bot]' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    steps:
+      - name: Descargar repositorio (historial completo para Sonar)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verificar configuración de SonarCloud
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+        run: |
+          missing=0
+          [ -z "$SONAR_TOKEN" ] && echo "::error::Falta el secret SONAR_TOKEN (Settings > Secrets and variables > Actions)" && missing=1
+          [ -z "$SONAR_ORGANIZATION" ] && echo "::error::Falta la variable SONAR_ORGANIZATION" && missing=1
+          [ -z "$SONAR_PROJECT_KEY" ] && echo "::error::Falta la variable SONAR_PROJECT_KEY" && missing=1
+          exit $missing
+
+      - name: Instalar JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v5
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: maven
+
+      - name: Cache de SonarCloud
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+
+      # Los valores se pasan como variables de entorno (no como expresiones dentro
+      # del comando) para evitar inyección de comandos en el shell.
+      - name: Análisis y espera del Quality Gate
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+        run: >
+          mvn -B -ntp verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
+          -Dsonar.host.url=https://sonarcloud.io
+          "-Dsonar.organization=${SONAR_ORGANIZATION}"
+          "-Dsonar.projectKey=${SONAR_PROJECT_KEY}"
+          -Dsonar.qualitygate.wait=true
+          -Dsonar.qualitygate.timeout=300
+
+  # -------------------------------------------------------------------
+  # 3. Revisión de dependencias nuevas en Pull Requests
+  #    Bloquea el PR si introduce una dependencia con vulnerabilidad alta/crítica
+  # -------------------------------------------------------------------
+  dependency-review:
+    name: 3 · Revisión de dependencias (PR)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: ${{ github.actor == 'dependabot[bot]' && 'never' || 'on-failure' }}
+
+  # -------------------------------------------------------------------
+  # 4. Imagen Docker: lint, build, escaneo de vulnerabilidades y publicación
+  # -------------------------------------------------------------------
+  docker:
+    name: 4 · Imagen Docker (build, escaneo, publicación)
+    needs: [build-test, sonar]
+    # Requiere pruebas OK y Sonar OK (o Sonar omitido solo en PRs de Dependabot)
+    if: >-
+      always() &&
+      needs.build-test.result == 'success' &&
+      (needs.sonar.result == 'success' || (needs.sonar.result == 'skipped' && github.actor == 'dependabot[bot]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write          # publicar en GitHub Container Registry
+      security-events: write   # subir resultados del escaneo a la pestaña Security
+    outputs:
+      image: ${{ steps.vars.outputs.image }}
+      image-ref: ${{ steps.vars.outputs.image }}:sha-${{ steps.vars.outputs.short_sha }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v5
+
+      - name: Calcular nombre de imagen y versión
+        id: vars
+        run: |
+          {
+            echo "image=ghcr.io/${GITHUB_REPOSITORY,,}"
+            echo "short_sha=${GITHUB_SHA::7}"
+            echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Lint del Dockerfile (hadolint)
+        run: docker run --rm -i hadolint/hadolint:v2.12.0-alpine hadolint --failure-threshold error - < Dockerfile
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Generar tags y labels (trazabilidad)
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ steps.vars.outputs.image }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Construir imagen (local, para escanear antes de publicar)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          load: true
+          push: false
+          tags: pokemon-service:scan
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            APP_VERSION=${{ steps.meta.outputs.version }}
+            BUILD_DATE=${{ steps.vars.outputs.build_date }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # BLOQUEO: si la imagen tiene vulnerabilidades CRÍTICAS con parche
+      # disponible, el job falla y la imagen NO se publica ni se despliega.
+      # Todas las demás (altas, medias...) quedan como alertas en Security.
+      - name: Escanear vulnerabilidades de la imagen (Grype)
+        id: scan
+        uses: anchore/scan-action@1638637db639e0ade3258b51db49a9a137574c3e # v6.5.1
+        with:
+          image: pokemon-service:scan
+          fail-build: true
+          severity-cutoff: critical
+          only-fixed: true
+          output-format: sarif
+
+      # Si el escaneo bloquea, muestra en el log y en el resumen QUÉ vulnerabilidad lo causó
+      - name: Detalle de vulnerabilidades que bloquean
+        if: failure() && steps.scan.outcome == 'failure'
+        env:
+          SARIF: ${{ steps.scan.outputs.sarif }}
+        run: |
+          {
+            echo "## Vulnerabilidades críticas con parche disponible"
+            jq -r '[.runs[].results[]] as $r | ([$r[] | select(.level == "error")] | if length > 0 then . else $r end)[] | "- **\(.ruleId)**: \(.message.text)"' "$SARIF" | sort -u
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Enviar resultados del escaneo a GitHub Security (alertas)
+        if: always() && steps.scan.outputs.sarif != ''
+        continue-on-error: true   # requiere repo público o GitHub Advanced Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+          category: grype-container
+
+      - name: Iniciar sesión en GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publicar imagen en GHCR
+        id: push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            APP_VERSION=${{ steps.meta.outputs.version }}
+            BUILD_DATE=${{ steps.vars.outputs.build_date }}
+          cache-from: type=gha
+          # SBOM y procedencia: qué contiene la imagen y cómo/dónde se construyó
+          sbom: true
+          provenance: mode=max
+
+      - name: Resumen de la imagen
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ steps.vars.outputs.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "## Imagen publicada"
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| Imagen | \`${IMAGE}\` |"
+            echo "| Digest | \`${DIGEST}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Tags | $(echo "$TAGS" | sed 's/.*://' | paste -sd ' ' -) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # -------------------------------------------------------------------
+  # 5. Despliegue automático en entorno simulado (Docker Compose)
+  # -------------------------------------------------------------------
+  deploy-staging:
+    name: 5 · Deploy staging
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      image-ref: ${{ needs.docker.outputs.image-ref }}
+      digest: ${{ needs.docker.outputs.digest }}
+      replicas: 2
+
+  deploy-production:
+    name: 5 · Deploy production
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      image-ref: ${{ needs.docker.outputs.image-ref }}
+      digest: ${{ needs.docker.outputs.digest }}
+      replicas: 3
