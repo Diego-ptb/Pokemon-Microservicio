@@ -6,8 +6,10 @@ spring:
 
   # Configuración de Base de Datos
   datasource:
-    url: ${DB_URL:jdbc:postgresql://aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require}
-    username: ${DB_USERNAME:postgres.wgckznwgamfiadgtvyds}
+    # Sin credenciales reales por defecto: se inyectan por variables de entorno
+    # (.env en local, secrets/variables en el pipeline, environment en Docker Compose)
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/pokemon}
+    username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:}
     driver-class-name: ${DB_DRIVER:org.postgresql.Driver}
 
@@ -39,10 +41,11 @@ spring:
 logging:
   level:
     root: INFO
-    com.pokemon: DEBUG
+    com.pokemon: ${LOG_LEVEL_APP:DEBUG}
     org.springframework.web: INFO
-    org.hibernate.SQL: DEBUG
-    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    org.hibernate.SQL: ${LOG_LEVEL_SQL:DEBUG}
+    # TRACE muestra los valores de los parámetros SQL: útil en desarrollo, no en producción
+    org.hibernate.orm.jdbc.bind: ${LOG_LEVEL_SQL_BIND:INFO}
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 
@@ -51,6 +54,36 @@ server:
   port: ${SERVER_PORT:8080}
   servlet:
     context-path: /
+  # Al detener el contenedor termina las peticiones en curso antes de apagarse
+  shutdown: graceful
+
+# Actuator: endpoints de salud para los healthchecks de Docker/Compose
+# e info de versión para la trazabilidad (qué commit está desplegado)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: pokemon-service
+    version: ${APP_VERSION:local}
+    commit: ${GIT_COMMIT:unknown}
+    environment: ${DEPLOY_ENV:local}
 
 # Configuración de Swagger/OpenAPI
 springdoc:
