@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/root/.m2 \
  && cp target/*.jar application.jar
 
 # ---------- Etapa 2: extracción en capas ----------
-FROM eclipse-temurin:21-jre-alpine AS extract
+FROM eclipse-temurin:25-jre-alpine AS extract
 WORKDIR /builder
 COPY --from=build /workspace/application.jar application.jar
 # Spring Boot separa librerías (cambian poco) del código propio (cambia
@@ -36,7 +36,7 @@ COPY --from=build /workspace/application.jar application.jar
 RUN java -Djarmode=tools -jar application.jar extract --layers --destination extracted
 
 # ---------- Etapa 3: imagen final de ejecución ----------
-FROM eclipse-temurin:21-jre-alpine AS runtime
+FROM eclipse-temurin:25-jre-alpine AS runtime
 
 # Metadatos de trazabilidad (los completa el pipeline con --build-arg)
 ARG GIT_COMMIT=unknown
