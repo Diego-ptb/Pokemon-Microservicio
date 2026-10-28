@@ -113,7 +113,7 @@ services:
   # Gateway / balanceador de carga (único punto de entrada)
   # ------------------------------------------------------------------
   gateway:
-    image: nginxinc/nginx-unprivileged:1.28-alpine
+    image: nginxinc/nginx-unprivileged:1.31-alpine
     restart: unless-stopped
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
