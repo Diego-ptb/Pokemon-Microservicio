@@ -376,6 +376,7 @@ Los entornos `staging` y `production` quedan registrados en **GitHub → Environ
 * **Dependencias:**
   * Dependabot revisa cada semana Maven, imágenes Docker, Docker Compose y GitHub Actions, y abre PRs hacia `develop`.
   * Dependency Review bloquea los PRs que agreguen dependencias vulnerables.
+* **Cadena de suministro del pipeline:** las acciones de terceros (Docker, Anchore) están fijadas por hash de commit y no por etiqueta, para que nadie pueda cambiar su código sin que se note (Dependabot las mantiene actualizadas). Los valores dinámicos se pasan a los comandos como variables de entorno para evitar inyección de comandos.
 * **Imagen:** hadolint para buenas prácticas del Dockerfile y Grype para vulnerabilidades. Las críticas con parche bloquean la publicación; el resto queda como **alerta** en *Security → Code scanning*.
 * **Alertas:** cuando un job falla, GitHub notifica por correo al autor del commit. Los hallazgos de seguridad aparecen en la pestaña *Security* y los de SonarCloud en su panel (y como comentario en el PR).
 * **Secretos:**

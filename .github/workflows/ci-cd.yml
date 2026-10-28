@@ -144,14 +144,18 @@ jobs:
           path: ~/.sonar/cache
           key: ${{ runner.os }}-sonar
 
+      # Los valores se pasan como variables de entorno (no como expresiones dentro
+      # del comando) para evitar inyección de comandos en el shell.
       - name: Análisis y espera del Quality Gate
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
         run: >
           mvn -B -ntp verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
           -Dsonar.host.url=https://sonarcloud.io
-          -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
-          -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+          "-Dsonar.organization=${SONAR_ORGANIZATION}"
+          "-Dsonar.projectKey=${SONAR_PROJECT_KEY}"
           -Dsonar.qualitygate.wait=true
           -Dsonar.qualitygate.timeout=300
 
@@ -211,11 +215,11 @@ jobs:
         run: docker run --rm -i hadolint/hadolint:v2.12.0-alpine hadolint --failure-threshold error - < Dockerfile
 
       - name: Configurar Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Generar tags y labels (trazabilidad)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ steps.vars.outputs.image }}
           tags: |
@@ -225,7 +229,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Construir imagen (local, para escanear antes de publicar)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           load: true
@@ -243,7 +247,7 @@ jobs:
       # Todas las demás (altas, medias...) quedan como alertas en Security.
       - name: Escanear vulnerabilidades de la imagen (Grype)
         id: scan
-        uses: anchore/scan-action@v6
+        uses: anchore/scan-action@1638637db639e0ade3258b51db49a9a137574c3e # v6.5.1
         with:
           image: pokemon-service:scan
           fail-build: true
@@ -261,7 +265,7 @@ jobs:
 
       - name: Iniciar sesión en GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -270,7 +274,7 @@ jobs:
       - name: Publicar imagen en GHCR
         id: push
         if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           push: true
@@ -287,15 +291,19 @@ jobs:
 
       - name: Resumen de la imagen
         if: github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ steps.vars.outputs.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           {
             echo "## Imagen publicada"
             echo "| Campo | Valor |"
             echo "|---|---|"
-            echo "| Imagen | \`${{ steps.vars.outputs.image }}\` |"
-            echo "| Digest | \`${{ steps.push.outputs.digest }}\` |"
-            echo "| Commit | \`${{ github.sha }}\` |"
-            echo "| Tags | $(echo '${{ steps.meta.outputs.tags }}' | sed 's/.*://' | paste -sd ' ' -) |"
+            echo "| Imagen | \`${IMAGE}\` |"
+            echo "| Digest | \`${DIGEST}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Tags | $(echo "$TAGS" | sed 's/.*://' | paste -sd ' ' -) |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------
