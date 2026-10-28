@@ -255,6 +255,17 @@ jobs:
           only-fixed: true
           output-format: sarif
 
+      # Si el escaneo bloquea, muestra en el log y en el resumen QUÉ vulnerabilidad lo causó
+      - name: Detalle de vulnerabilidades que bloquean
+        if: failure() && steps.scan.outcome == 'failure'
+        env:
+          SARIF: ${{ steps.scan.outputs.sarif }}
+        run: |
+          {
+            echo "## Vulnerabilidades críticas con parche disponible"
+            jq -r '[.runs[].results[]] as $r | ([$r[] | select(.level == "error")] | if length > 0 then . else $r end)[] | "- **\(.ruleId)**: \(.message.text)"' "$SARIF" | sort -u
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Enviar resultados del escaneo a GitHub Security (alertas)
         if: always() && steps.scan.outputs.sarif != ''
         continue-on-error: true   # requiere repo público o GitHub Advanced Security
