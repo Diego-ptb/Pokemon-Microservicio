@@ -1,0 +1,155 @@
+# =====================================================================
+# Despliegue reutilizable en entorno cloud simulado (IE4 / IE5)
+#
+# Lo invoca ci-cd.yml para staging (develop) y production (main).
+# El "servidor" es el runner de GitHub: se levanta el stack completo con
+# Docker Compose (gateway + N réplicas + PostgreSQL) usando la imagen
+# EXACTA que se probó y escaneó (tag sha-<commit>), se verifica con
+# smoke tests y se deja evidencia (resumen, logs) asociada al commit.
+# =====================================================================
+name: Deploy (reutilizable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Nombre del entorno (staging / production)
+        required: true
+        type: string
+      image-ref:
+        description: Imagen a desplegar (ghcr.io/owner/repo:sha-xxxxxxx)
+        required: true
+        type: string
+      digest:
+        description: Digest sha256 de la imagen publicada
+        required: false
+        type: string
+      replicas:
+        description: Número de réplicas del microservicio
+        required: false
+        type: number
+        default: 2
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    name: Desplegar en ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Los entornos aparecen en GitHub (pestaña Environments / Deployments)
+    # con el historial de qué commit se desplegó, cuándo y quién lo hizo.
+    # En "production" se pueden exigir aprobaciones manuales desde Settings.
+    environment:
+      name: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      APP_IMAGE: ${{ inputs.image-ref }}
+      DEPLOY_ENV: ${{ inputs.environment }}
+      APP_REPLICAS: ${{ inputs.replicas }}
+      GIT_COMMIT: ${{ github.sha }}
+      GATEWAY_PORT: "8080"
+    steps:
+      - name: Descargar configuración de despliegue
+        uses: actions/checkout@v5
+
+      - name: Iniciar sesión en GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # La contraseña de la BD se genera en cada despliegue y nunca se
+      # escribe en el repositorio ni aparece en los logs (se enmascara).
+      - name: Preparar variables del entorno
+        run: |
+          DB_PASS="$(openssl rand -hex 24)"
+          echo "::add-mask::${DB_PASS}"
+          {
+            echo "POSTGRES_PASSWORD=${DB_PASS}"
+            echo "POSTGRES_DB=pokemon"
+            echo "POSTGRES_USER=pokemon"
+          } > .env
+          docker compose config --quiet
+
+      - name: Descargar imagen ${{ inputs.image-ref }}
+        run: docker compose pull app
+
+      - name: Desplegar stack con Docker Compose
+        run: |
+          docker compose up -d --no-build --wait --wait-timeout 240
+          docker compose ps
+
+      - name: Smoke tests post-despliegue
+        env:
+          BASE_URL: http://localhost:8080
+          EXPECTED_COMMIT: ${{ github.sha }}
+          EXPECTED_REPLICAS: ${{ inputs.replicas }}
+        run: bash scripts/smoke-test.sh
+
+      - name: Prueba de autorecuperación (se elimina una réplica)
+        run: |
+          victim="$(docker compose ps -q app | head -n1)"
+          echo "Deteniendo réplica ${victim:0:12}"
+          docker kill "$victim"
+          # El gateway debe seguir respondiendo con las réplicas restantes
+          for _ in $(seq 1 10); do
+            curl -sf http://localhost:8080/api/pokemons/1 > /dev/null
+          done
+          echo "El servicio siguió disponible con una réplica caída"
+          # Compose restaura el número deseado de réplicas
+          docker compose up -d --no-build --wait --wait-timeout 180 app
+          running="$(docker compose ps -q --status running app | wc -l)"
+          echo "Réplicas en ejecución: ${running}"
+          test "$running" -eq "${{ inputs.replicas }}"
+
+      - name: Registro de trazabilidad del despliegue
+        if: always()
+        run: |
+          image_id="$(docker image inspect --format '{{index .RepoDigests 0}}' "$APP_IMAGE" 2>/dev/null || echo 'n/a')"
+          revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$APP_IMAGE" 2>/dev/null || echo 'n/a')"
+          {
+            echo "## Despliegue en \`${{ inputs.environment }}\`"
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| Estado | ${{ job.status }} |"
+            echo "| Commit | [\`${GITHUB_SHA::7}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |"
+            echo "| Rama | \`${{ github.ref_name }}\` |"
+            echo "| Autor del cambio | @${{ github.actor }} |"
+            echo "| Imagen | \`${APP_IMAGE}\` |"
+            echo "| Digest | \`${image_id}\` |"
+            echo "| Revisión en la imagen (label OCI) | \`${revision}\` |"
+            echo "| Réplicas | ${{ inputs.replicas }} |"
+            echo "| Ejecución | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo "| Fecha (UTC) | $(date -u +'%Y-%m-%d %H:%M:%S') |"
+            echo
+            echo "### Estado de los contenedores"
+            echo '```'
+            docker compose ps --format 'table {{.Name}}\t{{.Image}}\t{{.Status}}' || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar logs del despliegue
+        if: always()
+        run: |
+          mkdir -p deploy-logs
+          docker compose ps -a > deploy-logs/compose-ps.txt 2>&1 || true
+          docker compose logs --no-color --timestamps > deploy-logs/compose.log 2>&1 || true
+
+      - name: Publicar logs como artefacto
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-logs-${{ inputs.environment }}-${{ github.sha }}
+          path: deploy-logs/
+          retention-days: 30
+
+      # El entorno simulado vive solo durante el job: se limpia al final
+      - name: Apagar entorno simulado
+        if: always()
+        run: docker compose down -v --remove-orphans

@@ -250,6 +250,44 @@ class PokemonServiceTest {
     }
 
     @Test
+    @DisplayName("Actualizar con todos los campos nulos no modifica el Pokémon")
+    void testUpdatePokemonWithNullFieldsKeepsValues() {
+        // Arrange: el repositorio devuelve lo mismo que recibe
+        when(pokemonRepository.findById(1L)).thenReturn(Optional.of(testPokemon));
+        when(pokemonRepository.save(any(Pokemon.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // Act
+        PokemonResponseDto result = pokemonService.updatePokemon(1L,
+                new UpdatePokemonDto(null, null, null, null, null));
+
+        // Assert: se conservan todos los valores originales
+        assertEquals("Pikachu", result.getName());
+        assertEquals("Electric", result.getType());
+        assertEquals(25, result.getLevel());
+        assertEquals("El famoso Pokémon", result.getDescription());
+        assertEquals("https://example.com/pikachu.png", result.getImageUrl());
+    }
+
+    @Test
+    @DisplayName("Actualizar ignora nombre y tipo en blanco, pero aplica los demás campos")
+    void testUpdatePokemonIgnoresBlankNameAndType() {
+        // Arrange
+        when(pokemonRepository.findById(1L)).thenReturn(Optional.of(testPokemon));
+        when(pokemonRepository.save(any(Pokemon.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // Act
+        PokemonResponseDto result = pokemonService.updatePokemon(1L,
+                new UpdatePokemonDto("   ", "", 40, "Nueva descripción", "https://example.com/nueva.png"));
+
+        // Assert
+        assertEquals("Pikachu", result.getName());
+        assertEquals("Electric", result.getType());
+        assertEquals(40, result.getLevel());
+        assertEquals("Nueva descripción", result.getDescription());
+        assertEquals("https://example.com/nueva.png", result.getImageUrl());
+    }
+
+    @Test
     @DisplayName("Actualizar Pokémon no encontrado lanza excepción")
     void testUpdatePokemonNotFound() {
         // Arrange

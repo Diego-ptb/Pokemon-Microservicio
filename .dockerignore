@@ -1,0 +1,18 @@
+# Solo pom.xml y src/ son necesarios para construir la imagen.
+# Excluir el resto reduce el contexto de build y evita filtrar secretos.
+.git
+.github
+.idea
+.vscode
+target
+deploy
+scripts
+*.md
+*.iml
+.env
+.env.*
+!.env.example
+docker-compose*.yml
+Dockerfile
+.dockerignore
+schema.sql

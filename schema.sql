@@ -214,3 +214,8 @@ VALUES
     (150, 'Mewtwo', 'Psíquico', 150, 'Fue creado mediante experimentos genéticos y posee enormes poderes psíquicos.', 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/150.png', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
     (151, 'Mew', 'Psíquico', 151, 'Es extremadamente raro y posee el material genético de todos los Pokémon.', 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/151.png', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT (id) DO NOTHING;
+-- Sincroniza la secuencia del ID con los datos insertados.
+-- Los INSERT anteriores usan IDs explícitos (1..151) y no avanzan la secuencia
+-- BIGSERIAL; sin esta línea el primer POST intentaría usar id=1 y fallaría
+-- con "duplicate key value violates unique constraint".
+SELECT setval(pg_get_serial_sequence('pokemon', 'id'), COALESCE((SELECT MAX(id) FROM pokemon), 1));

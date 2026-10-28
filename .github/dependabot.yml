@@ -1,0 +1,60 @@
+# Dependabot: revisa semanalmente dependencias desactualizadas o vulnerables
+# y abre Pull Requests hacia develop (GitFlow). Cada PR pasa por el pipeline
+# completo (pruebas, SonarCloud, revisión de dependencias) antes del merge.
+version: 2
+updates:
+  # Dependencias Java (pom.xml)
+  - package-ecosystem: maven
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: America/Santiago
+    open-pull-requests-limit: 5
+    labels: [dependencies, java]
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Agrupa parches/menores para no saturar de PRs
+      maven-minor-patch:
+        update-types: [minor, patch]
+
+  # Imágenes base del Dockerfile (JDK/JRE)
+  - package-ecosystem: docker
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: America/Santiago
+    labels: [dependencies, docker]
+    commit-message:
+      prefix: "chore(docker)"
+
+  # Imágenes de docker-compose.yml (PostgreSQL, Nginx)
+  - package-ecosystem: docker-compose
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: America/Santiago
+    labels: [dependencies, docker]
+    commit-message:
+      prefix: "chore(compose)"
+
+  # Acciones usadas en los workflows de GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: America/Santiago
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      github-actions:
+        patterns: ["*"]
