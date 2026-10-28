@@ -20,7 +20,11 @@ function Invoke-Api {
     if ($Body) { $params.Body = [Text.Encoding]::UTF8.GetBytes($Body); $params.ContentType = "application/json" }
     try {
         $r = Invoke-WebRequest @params
-        return [pscustomobject]@{ Status = [int]$r.StatusCode; Content = $r.Content; Headers = $r.Headers }
+        # PowerShell 5.1 entrega como bytes los tipos que no reconoce como texto
+        # (p. ej. application/vnd.spring-boot.actuator.v3+json del actuator)
+        $content = $r.Content
+        if ($content -is [byte[]]) { $content = [Text.Encoding]::UTF8.GetString($content) }
+        return [pscustomobject]@{ Status = [int]$r.StatusCode; Content = $content; Headers = $r.Headers }
     } catch {
         $resp = $_.Exception.Response
         if ($null -eq $resp) { throw }
