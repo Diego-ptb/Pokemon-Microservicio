@@ -222,7 +222,7 @@ El pipeline está definido en `.github/workflows/ci-cd.yml` y el despliegue en e
 | Evento | Qué se ejecuta |
 |---|---|
 | Pull Request hacia `develop` o `main` | Build y pruebas, SonarCloud, revisión de dependencias y build + escaneo de la imagen (no se publica ni se despliega) |
-| Push / merge a `develop` | Pipeline completo y **despliegue automático en `staging`** (2 réplicas) |
+| Push / merge a `develop` | Build y pruebas, imagen Docker con escaneo y **despliegue automático en `staging`** (2 réplicas). SonarCloud ya se ejecutó en el PR. |
 | Push / merge a `main` | Pipeline completo y **despliegue automático en `production`** (3 réplicas) |
 | Manual (`workflow_dispatch`) | Pipeline completo sobre la rama elegida |
 
@@ -243,7 +243,7 @@ flowchart LR
 | # | Job | Indicador | Qué hace | Bloquea si... |
 |---|---|---|---|---|
 | 1 | Build y pruebas unitarias | IE2 | `mvn verify`: compila, ejecuta las pruebas JUnit, genera el reporte JaCoCo y verifica la cobertura mínima. Publica los reportes y el JAR como artefactos. | falla una prueba o la cobertura de líneas es menor a 80 % |
-| 2 | Análisis SonarCloud | IE3 | Análisis estático (bugs, vulnerabilidades, code smells, security hotspots y cobertura) y espera el resultado del Quality Gate. | el Quality Gate no se aprueba |
+| 2 | Análisis SonarCloud | IE3 | Análisis estático (bugs, vulnerabilidades, code smells, security hotspots y cobertura) y espera el resultado del Quality Gate. Corre en cada PR y en cada push a `main`. El plan gratuito de SonarCloud no analiza otras ramas, pero todo lo que entra a `develop` ya pasó el Quality Gate en su PR. | el Quality Gate no se aprueba |
 | 3 | Revisión de dependencias | IE3 | En cada PR compara las dependencias nuevas contra la base de vulnerabilidades de GitHub. | se agrega una dependencia con vulnerabilidad alta o crítica |
 | 4 | Imagen Docker | IE1, IE3, IE4 | Lint del Dockerfile (hadolint), construcción de la imagen, escaneo con Grype, publicación en GHCR con SBOM y procedencia. | hay errores en el Dockerfile o vulnerabilidades críticas con parche disponible |
 | 5 | Deploy staging / production | IE4, IE5 | Levanta el stack completo con Docker Compose usando la imagen publicada, ejecuta smoke tests y una prueba de autorrecuperación, y registra la trazabilidad. | el stack no queda sano o falla algún smoke test |

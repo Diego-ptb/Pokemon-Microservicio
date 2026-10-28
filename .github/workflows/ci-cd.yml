@@ -108,11 +108,16 @@ jobs:
     name: 2 · Análisis SonarCloud (Quality Gate)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Los PR desde forks y los de Dependabot no reciben secretos, así que no se
-    # pueden analizar aquí; se analizan al hacer merge a develop/main (push).
+    # Cuándo se analiza (plan gratuito de SonarCloud: solo rama principal y PRs):
+    #  - En cada Pull Request (así todo cambio que entra a develop o main pasa el Quality Gate)
+    #  - En cada push a main (estado oficial del proyecto)
+    # Los PR desde forks y los de Dependabot no reciben secretos, así que se omiten.
     if: >-
       github.actor != 'dependabot[bot]' &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      (
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+        github.ref == 'refs/heads/main'
+      )
     steps:
       - name: Descargar repositorio (historial completo para Sonar)
         uses: actions/checkout@v5
@@ -183,11 +188,13 @@ jobs:
   docker:
     name: 4 · Imagen Docker (build, escaneo, publicación)
     needs: [build-test, sonar]
-    # Requiere pruebas OK y Sonar OK (o Sonar omitido solo en PRs de Dependabot)
+    # Requiere pruebas OK y Sonar OK. Sonar solo puede omitirse fuera de main
+    # (push a develop, cuyo código ya pasó el Quality Gate en su PR, o PRs de Dependabot).
+    # En main el Quality Gate es SIEMPRE obligatorio.
     if: >-
       always() &&
       needs.build-test.result == 'success' &&
-      (needs.sonar.result == 'success' || (needs.sonar.result == 'skipped' && github.actor == 'dependabot[bot]'))
+      (needs.sonar.result == 'success' || (needs.sonar.result == 'skipped' && github.ref != 'refs/heads/main'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
