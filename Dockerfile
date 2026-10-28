@@ -48,8 +48,12 @@ LABEL org.opencontainers.image.title="pokemon-service" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
+# Aplica los parches de seguridad publicados para los paquetes del sistema
+# base (Alpine) desde que se construyó la imagen eclipse-temurin.
 # Usuario sin privilegios (UID fijo, sin shell de login)
-RUN addgroup -S -g 10001 spring \
+# hadolint ignore=DL3017
+RUN apk upgrade --no-cache \
+ && addgroup -S -g 10001 spring \
  && adduser -S -D -H -u 10001 -G spring -s /sbin/nologin spring
 
 WORKDIR /application
