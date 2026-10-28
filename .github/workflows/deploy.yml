@@ -96,16 +96,31 @@ jobs:
         run: |
           victim="$(docker compose ps -q app | head -n1)"
           echo "Deteniendo réplica ${victim:0:12}"
-          docker kill "$victim"
-          # El gateway debe seguir respondiendo con las réplicas restantes
-          for _ in $(seq 1 10); do
-            curl -sf http://localhost:8080/api/pokemons/1 > /dev/null
+          docker kill "$victim" > /dev/null
+
+          # Durante 20 peticiones (~10 s) el gateway debe seguir respondiendo
+          # con las réplicas restantes. Se tolera una falla puntual en el
+          # instante exacto del corte (failover), pero no más.
+          ok=0; codes=""
+          for _ in $(seq 1 20); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 http://localhost:8080/api/pokemons/1 || true)"
+            codes="${codes} ${code}"
+            [ "$code" = "200" ] && ok=$((ok + 1))
+            sleep 0.5
           done
+          echo "Códigos HTTP con una réplica caída:${codes}"
+          echo "Respuestas exitosas: ${ok}/20"
+          if [ "$ok" -lt 19 ]; then
+            echo "::error::El servicio no se mantuvo disponible tras perder una réplica"
+            docker compose logs --tail 30 gateway
+            exit 1
+          fi
           echo "El servicio siguió disponible con una réplica caída"
+
           # Compose restaura el número deseado de réplicas
           docker compose up -d --no-build --wait --wait-timeout 180 app
           running="$(docker compose ps -q --status running app | wc -l)"
-          echo "Réplicas en ejecución: ${running}"
+          echo "Réplicas en ejecución: ${running} (esperadas: ${APP_REPLICAS})"
           test "$running" -eq "$APP_REPLICAS"
 
       - name: Registro de trazabilidad del despliegue
