@@ -330,7 +330,9 @@ jobs:
   deploy-staging:
     name: 5 · Deploy staging
     needs: docker
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    # always(): sin esto GitHub salta el deploy cuando un job anterior de la
+    # cadena fue omitido (p. ej. SonarCloud en develop), aunque la imagen esté OK
+    if: always() && needs.docker.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/develop'
     permissions:
       contents: read
       packages: read
@@ -344,7 +346,9 @@ jobs:
   deploy-production:
     name: 5 · Deploy production
     needs: docker
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # always(): sin esto GitHub salta el deploy cuando un job anterior de la
+    # cadena fue omitido (p. ej. SonarCloud en develop), aunque la imagen esté OK
+    if: always() && needs.docker.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: read
