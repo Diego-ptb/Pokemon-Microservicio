@@ -1,0 +1,28 @@
+# =====================================================================
+# Variante opcional: la app usa la base de datos en la nube (Supabase)
+# en lugar del contenedor PostgreSQL local.
+#
+# Uso (se combina con el docker-compose.yml normal):
+#   docker compose -f docker-compose.yml -f docker-compose.supabase.yml up -d --wait
+#
+# Requiere en .env:
+#   SUPABASE_DB_URL=jdbc:postgresql://<host-del-pooler>:5432/postgres?sslmode=require
+#   SUPABASE_DB_USER=postgres.<id-del-proyecto>
+#   SUPABASE_DB_PASSWORD=<clave de la base de Supabase>
+#
+# Solo cambia variables de entorno: el código y la imagen son los mismos.
+# =====================================================================
+services:
+  app:
+    environment:
+      DB_URL: ${SUPABASE_DB_URL:?Define SUPABASE_DB_URL en .env}
+      DB_USERNAME: ${SUPABASE_DB_USER:?Define SUPABASE_DB_USER en .env}
+      DB_PASSWORD: ${SUPABASE_DB_PASSWORD:?Define SUPABASE_DB_PASSWORD en .env}
+      DEPLOY_ENV: ${DEPLOY_ENV:-local}-supabase
+      # El plan gratuito de Supabase limita las conexiones simultáneas
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "3"
+    # La red "backend" es interna (sin Internet); para llegar a Supabase
+    # la app necesita también la red con salida.
+    networks:
+      - backend
+      - frontend
