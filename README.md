@@ -24,7 +24,7 @@ El repositorio forma parte de las evaluaciones de la asignatura **Ingeniería De
 ## 3. Tecnologías utilizadas
 
 * Java 21 / Spring Boot 3.5 / Maven
-* PostgreSQL (Supabase en desarrollo, contenedor PostgreSQL 16 en el entorno simulado)
+* PostgreSQL: Supabase (nube) en production y AWS EC2; contenedor PostgreSQL 16 en local y staging
 * JUnit 5, Mockito, MockMvc y JaCoCo (pruebas y cobertura)
 * Docker (imagen multi-stage) y Docker Compose (orquestación)
 * Nginx (gateway y balanceador de carga)
@@ -247,6 +247,7 @@ flowchart LR
 | 3 | Revisión de dependencias | IE3 | En cada PR compara las dependencias nuevas contra la base de vulnerabilidades de GitHub. | se agrega una dependencia con vulnerabilidad alta o crítica |
 | 4 | Imagen Docker | IE1, IE3, IE4 | Lint del Dockerfile (hadolint), construcción de la imagen, escaneo con Grype, publicación en GHCR con SBOM y procedencia. | hay errores en el Dockerfile o vulnerabilidades críticas con parche disponible |
 | 5 | Deploy staging / production | IE4, IE5 | Levanta el stack completo con Docker Compose usando la imagen publicada, ejecuta smoke tests y una prueba de autorrecuperación, y registra la trazabilidad. | el stack no queda sano o falla algún smoke test |
+| 6 | Deploy AWS EC2 | IE4, IE5 | Después de production, copia la configuración a la instancia EC2 por SSH, instala Docker si falta, descarga la imagen exacta desde GHCR, levanta el stack con Docker Compose y ejecuta los smoke tests contra la IP pública. Si los secrets de EC2 no existen, se omite con un aviso. | el stack no queda sano en la instancia o falla algún smoke test |
 
 Cada job depende del anterior (`needs`): si una etapa falla, las siguientes no se ejecutan y la imagen **no** se publica ni se despliega.
 
@@ -401,7 +402,20 @@ Pasos previos para que el pipeline funcione:
 2. **Dependabot:** en *Settings → Code security* activar *Dependency graph*, *Dependabot alerts* y *Dependabot security updates*. Las actualizaciones de versión se configuran en `.github/dependabot.yml`.
 3. **Environments** (*Settings → Environments*): crear `staging` y `production`. Opcionalmente, en `production` agregar *Required reviewers* para exigir una aprobación manual antes de desplegar.
 4. **Protección de ramas** (*Settings → Branches*) para `main` y `develop`: exigir PR y que pasen los checks `1 · Build y pruebas unitarias`, `2 · Análisis SonarCloud (Quality Gate)` y `4 · Imagen Docker`.
-5. Reemplazar `OWNER/REPO` en la insignia al inicio de este README.
+5. **AWS EC2 (laboratorio AWS Academy)**
+   * **Secret** `EC2_HOST`: IP pública de la instancia.
+   * **Secret** `EC2_SSH_KEY`: contenido completo de la llave privada `.pem` (desde `-----BEGIN` hasta `-----END`).
+   * **Variable** `EC2_USER` (opcional): `ec2-user` en Amazon Linux (valor por defecto) o `ubuntu` en Ubuntu.
+   * **Variable** `EC2_APP_REPLICAS` (opcional): réplicas en la instancia (por defecto 2).
+   * Security group con entrada **22 (SSH)** y **80 (HTTP)** abiertas. Instancia **x86_64** con al menos **2 GB de RAM** (t3.small o mayor); con 1 GB usar `EC2_APP_REPLICAS=1`.
+   * Al cambiar la instancia (nuevo laboratorio) basta con actualizar `EC2_HOST` y `EC2_SSH_KEY`.
+6. **Supabase (base de datos en la nube para production y EC2)**
+   * Crear el proyecto en https://supabase.com y ejecutar `schema.sql` en el **SQL Editor**.
+   * En **Connect → Session pooler** copiar host, usuario y puerto (el pooler funciona por IPv4, la conexión directa no).
+   * **Secret** `SUPABASE_DB_URL`: `jdbc:postgresql://<host-del-pooler>:5432/postgres?sslmode=require`
+   * **Secret** `SUPABASE_DB_USER`: `postgres.<id-del-proyecto>`
+   * **Secret** `SUPABASE_DB_PASSWORD`: la clave de la base.
+   * Staging y el entorno local siguen usando PostgreSQL en contenedor (datos de prueba desechables). Si faltan estos secrets, production y EC2 también usan PostgreSQL local y el pipeline lo advierte.
 
 ---
 
