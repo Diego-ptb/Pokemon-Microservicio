@@ -44,10 +44,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Descargar repositorio
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Instalar JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: ${{ env.JAVA_DISTRIBUTION }}
@@ -84,7 +84,7 @@ jobs:
 
       - name: Publicar reportes de pruebas y cobertura
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports-${{ github.sha }}
           path: |
@@ -93,7 +93,7 @@ jobs:
           retention-days: 30
 
       - name: Publicar JAR compilado (artefacto trazable al commit)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pokemon-service-jar-${{ github.sha }}
           path: target/*.jar
@@ -120,7 +120,7 @@ jobs:
       )
     steps:
       - name: Descargar repositorio (historial completo para Sonar)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -137,14 +137,14 @@ jobs:
           exit $missing
 
       - name: Instalar JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           cache: maven
 
       - name: Cache de SonarCloud
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.sonar/cache
           key: ${{ runner.os }}-sonar
@@ -176,8 +176,8 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/checkout@v7
+      - uses: actions/dependency-review-action@v5
         with:
           fail-on-severity: high
           comment-summary-in-pr: ${{ github.actor == 'dependabot[bot]' && 'never' || 'on-failure' }}
@@ -207,7 +207,7 @@ jobs:
       digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Descargar repositorio
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Calcular nombre de imagen y versión
         id: vars
@@ -222,11 +222,11 @@ jobs:
         run: docker run --rm -i hadolint/hadolint:v2.12.0-alpine hadolint --failure-threshold error - < Dockerfile
 
       - name: Configurar Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Generar tags y labels (trazabilidad)
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ steps.vars.outputs.image }}
           tags: |
@@ -236,7 +236,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Construir imagen (local, para escanear antes de publicar)
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           load: true
@@ -254,7 +254,7 @@ jobs:
       # Todas las demás (altas, medias...) quedan como alertas en Security.
       - name: Escanear vulnerabilidades de la imagen (Grype)
         id: scan
-        uses: anchore/scan-action@1638637db639e0ade3258b51db49a9a137574c3e # v6.5.1
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           image: pokemon-service:scan
           fail-build: true
@@ -276,14 +276,14 @@ jobs:
       - name: Enviar resultados del escaneo a GitHub Security (alertas)
         if: always() && steps.scan.outputs.sarif != ''
         continue-on-error: true   # requiere repo público o GitHub Advanced Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
           category: grype-container
 
       - name: Iniciar sesión en GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -292,7 +292,7 @@ jobs:
       - name: Publicar imagen en GHCR
         id: push
         if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: true
@@ -407,7 +407,7 @@ jobs:
 
       - name: Descargar configuración de despliegue
         if: steps.check.outputs.configured == 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Configurar llave SSH
         if: steps.check.outputs.configured == 'true'

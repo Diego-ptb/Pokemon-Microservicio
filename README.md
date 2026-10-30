@@ -9,7 +9,15 @@ Microservicio CRUD de Pokémon desarrollado con Spring Boot.
 El repositorio forma parte de las evaluaciones de la asignatura **Ingeniería DevOps**:
 
 * **Evaluación Parcial N°1:** control de versiones, estrategia de branching (GitFlow) y CI básica.
-* **Evaluación Parcial N°2:** pipeline CI/CD completo en GitHub Actions con contenedores, pruebas automatizadas, análisis de seguridad, despliegue automático en un entorno simulado y orquestación con Docker Compose (secciones 10 a 17).
+* **Evaluación Parcial N°2:** pipeline CI/CD completo en GitHub Actions con contenedores, pruebas automatizadas, análisis de seguridad, despliegue automático (entorno simulado y AWS EC2), base de datos en la nube con Supabase y orquestación con Docker Compose (secciones 10 a 18).
+
+**Aplicación desplegada en AWS EC2:**
+
+* API: http://52.6.20.105/api/pokemons
+* Swagger: http://52.6.20.105/swagger-ui.html
+* Versión desplegada: http://52.6.20.105/actuator/info
+
+> La instancia corre en un laboratorio de AWS Academy, que se apaga cuando termina la sesión. Si la URL no responde, el laboratorio está detenido; la evidencia de cada despliegue queda en *Actions* y en *Deployments*.
 
 ---
 
@@ -223,7 +231,7 @@ El pipeline está definido en `.github/workflows/ci-cd.yml` y el despliegue en e
 |---|---|
 | Pull Request hacia `develop` o `main` | Build y pruebas, SonarCloud, revisión de dependencias y build + escaneo de la imagen (no se publica ni se despliega) |
 | Push / merge a `develop` | Build y pruebas, imagen Docker con escaneo y **despliegue automático en `staging`** (2 réplicas). SonarCloud ya se ejecutó en el PR. |
-| Push / merge a `main` | Pipeline completo y **despliegue automático en `production`** (3 réplicas) |
+| Push / merge a `main` | Pipeline completo, **despliegue en `production`** (3 réplicas, Supabase) previa **aprobación manual**, y luego **despliegue en AWS EC2** (2 réplicas, Supabase) |
 | Manual (`workflow_dispatch`) | Pipeline completo sobre la rama elegida |
 
 ## 10.2 Etapas
@@ -237,8 +245,22 @@ flowchart LR
     C --> E
     E -->|sin vulnerabilidades críticas| F[Publicar en GHCR<br/>tag sha-commit]
     F -->|develop| G[5 · Deploy staging<br/>Compose + smoke tests]
-    F -->|main| H[5 · Deploy production<br/>Compose + smoke tests]
+    F -->|main + aprobación| H[5 · Deploy production<br/>Compose + Supabase + smoke tests]
+    H --> I[6 · Deploy AWS EC2<br/>SSH + Compose + smoke tests]
 ```
+
+### Por qué algunos jobs aparecen como omitidos (skipped)
+
+Un job omitido no es un error: el pipeline ejecuta solo lo que corresponde según el origen del cambio.
+
+| Job omitido | Cuándo | Motivo |
+|---|---|---|
+| 2 · SonarCloud | Push a `develop` | El plan gratuito solo analiza `main` y los PRs. Ese código ya pasó el Quality Gate en su PR. |
+| 2 · SonarCloud | PRs de Dependabot | GitHub no entrega secrets (el token de Sonar) a Dependabot. Igual pasan pruebas, revisión de dependencias y Grype. |
+| 3 · Revisión de dependencias | Push a `develop` / `main` | Compara los cambios de un PR; fuera de un PR no hay con qué comparar. |
+| Publicación de la imagen (job 4) | Pull Requests | En un PR la imagen se construye y escanea, pero no se publica hasta que el cambio se integra. |
+| 5 · Deploy staging / production | Ramas que no corresponden | Staging solo desde `develop`; production solo desde `main`. |
+| 6 · Deploy AWS EC2 | Si production no terminó bien | Solo se despliega en AWS lo que pasó production. Si faltan `EC2_HOST`/`EC2_SSH_KEY`, se omite con un aviso. |
 
 | # | Job | Indicador | Qué hace | Bloquea si... |
 |---|---|---|---|---|
@@ -352,6 +374,39 @@ El workflow `deploy.yml` usa el runner de GitHub Actions como "servidor cloud" s
 
 Los entornos `staging` y `production` quedan registrados en **GitHub → Environments / Deployments**, con su historial de despliegues.
 
+**Aprobación manual:** el entorno `production` tiene la regla *Required reviewers*. Cuando el pipeline llega a producción se detiene en *Waiting for review* hasta que un integrante lo aprueba (*Review deployments → Approve and deploy*). Queda registrado quién aprobó y cuándo.
+
+**Base de datos:** `production` usa Supabase (PostgreSQL en la nube) combinando `docker-compose.yml` con `docker-compose.supabase.yml`, que solo cambia las variables de conexión. `staging` usa un PostgreSQL en contenedor con datos desechables, para no ensuciar los datos reales.
+
+## 13.1 Despliegue en AWS EC2
+
+Después de `production`, el job **6 · Deploy AWS EC2** despliega en una instancia real del laboratorio AWS Academy:
+
+| Recurso | Configuración |
+|---|---|
+| Instancia | `pokemon-server`, Amazon Linux 2023, t3.small, 20 GiB gp3 |
+| Red | Elastic IP `52.6.20.105`; security group `pokemon-sg` con los puertos 22 (SSH) y 80 (HTTP) |
+| Acceso | Llave `pokemon-key.pem`, guardada solo en el secret `EC2_SSH_KEY` |
+| Base de datos | Supabase (proyecto `pokemon-ep2`, Session pooler, región us-east-1) |
+
+Pasos del job:
+
+1. Se conecta por SSH con los secrets `EC2_HOST` y `EC2_SSH_KEY`.
+2. Copia a `~/pokemon` los archivos de despliegue (`docker-compose.yml`, `docker-compose.supabase.yml`, `schema.sql`, configuración de Nginx y `scripts/ec2-deploy.sh`).
+3. Envía las credenciales de Supabase por stdin (no quedan en los logs ni en el repositorio).
+4. `ec2-deploy.sh` instala Docker y Docker Compose si faltan, descarga desde GHCR la imagen **exacta** que pasó las pruebas y el escaneo, y levanta el stack con `docker compose up --wait`.
+5. Ejecuta los smoke tests contra `http://52.6.20.105` y registra la trazabilidad en el *Job Summary*.
+
+Revisar el stack directamente en la instancia:
+
+```bash
+ssh -i pokemon-key.pem ec2-user@52.6.20.105
+cd ~/pokemon
+sudo docker compose -f docker-compose.yml -f docker-compose.supabase.yml ps
+```
+
+Al cambiar de instancia (nuevo laboratorio) basta con actualizar los secrets `EC2_HOST` y `EC2_SSH_KEY`; el código no cambia.
+
 ---
 
 # 14. Trazabilidad y calidad
@@ -400,7 +455,7 @@ Pasos previos para que el pipeline funcione:
       * **Variable** `SONAR_ORGANIZATION`: la key de la organización en SonarCloud.
       * **Variable** `SONAR_PROJECT_KEY`: la key del proyecto (por ejemplo `usuario_Pokemon-Microservicio`).
 2. **Dependabot:** en *Settings → Code security* activar *Dependency graph*, *Dependabot alerts* y *Dependabot security updates*. Las actualizaciones de versión se configuran en `.github/dependabot.yml`.
-3. **Environments** (*Settings → Environments*): crear `staging` y `production`. Opcionalmente, en `production` agregar *Required reviewers* para exigir una aprobación manual antes de desplegar.
+3. **Environments** (*Settings → Environments*): crear `staging` y `production`. En `production` se configuró *Required reviewers* para exigir una aprobación manual antes de desplegar.
 4. **Protección de ramas** (*Settings → Branches*) para `main` y `develop`: exigir PR y que pasen los checks `1 · Build y pruebas unitarias`, `2 · Análisis SonarCloud (Quality Gate)` y `4 · Imagen Docker`.
 5. **AWS EC2 (laboratorio AWS Academy)**
    * **Secret** `EC2_HOST`: IP pública de la instancia.
@@ -417,6 +472,19 @@ Pasos previos para que el pipeline funcione:
    * **Secret** `SUPABASE_DB_PASSWORD`: la clave de la base.
    * Staging y el entorno local siguen usando PostgreSQL en contenedor (datos de prueba desechables). Si faltan estos secrets, production y EC2 también usan PostgreSQL local y el pipeline lo advierte.
 
+**Resumen de secrets del repositorio:**
+
+| Secret | Para qué sirve |
+|---|---|
+| `EC2_HOST` | IP pública de la instancia EC2 (a qué servidor se conecta el pipeline) |
+| `EC2_SSH_KEY` | Llave privada SSH (`.pem`) para entrar a la instancia sin contraseña |
+| `SONAR_TOKEN` | Token de SonarCloud para enviar el análisis y consultar el Quality Gate |
+| `SUPABASE_DB_URL` | Dirección JDBC de la base de datos en Supabase |
+| `SUPABASE_DB_USER` | Usuario de la base de datos |
+| `SUPABASE_DB_PASSWORD` | Contraseña de la base de datos |
+
+GitHub guarda los secrets cifrados y los oculta como `***` en los logs. El `GITHUB_TOKEN` (para publicar en GHCR) no se configura: GitHub lo genera en cada ejecución y expira al terminar.
+
 ---
 
 # 16. Estructura del repositorio
@@ -432,14 +500,17 @@ Pasos previos para que el pipeline funcione:
 │   └── nginx/default.conf      # gateway / balanceador
 ├── scripts/
 │   ├── smoke-test.sh           # verificación post-despliegue (bash, usado por el pipeline)
-│   └── smoke-test.ps1          # misma verificación para Windows / PowerShell
+│   ├── smoke-test.ps1          # misma verificación para Windows / PowerShell
+│   └── ec2-deploy.sh           # despliegue en la instancia AWS EC2 (lo ejecuta el job 6)
 ├── src/
 │   ├── main/java/com/pokemon/  # controller, service, repository, dto, entity, exception
 │   └── test/java/com/pokemon/  # PokemonServiceTest, PokemonControllerTest
 ├── Dockerfile                  # imagen multi-stage
 ├── .dockerignore
 ├── docker-compose.yml          # orquestación: gateway + réplicas + PostgreSQL
+├── docker-compose.supabase.yml # variante: la app usa la base de Supabase
 ├── .env.example                # plantilla de variables (copiar a .env)
+├── .gitattributes              # fin de línea LF para scripts y configuración
 ├── schema.sql                  # tabla, datos iniciales y secuencia
 └── pom.xml                     # dependencias, JaCoCo y propiedades de Sonar
 ```
@@ -479,28 +550,68 @@ DELETE  /api/pokemons/{id}
 DELETE  /api/pokemons/name/{name}
 ```
 
-La documentación de la API se puede consultar con Swagger/OpenAPI en `/swagger-ui.html`.
+La documentación de la API se puede consultar con Swagger/OpenAPI en `/swagger-ui.html` (en AWS: http://52.6.20.105/swagger-ui.html). Los endpoints aparecen agrupados bajo la sección **Pokedex**.
 
 ---
 
 # 19. Justificación de decisiones técnicas
 
-> _A completar por el equipo, sin apoyo de IA (requisito de la pauta)._
+**¿Por qué Docker Compose y no Kubernetes?**
+
+Usamos Docker Compose porque era suficiente para nuestro proyecto y nos permitía administrar los contenedores de forma sencilla. Kubernetes habría sido una solución más compleja de lo que necesitábamos.
+
+**¿Por qué SonarCloud y Grype?**
+
+Usamos SonarCloud para revisar la calidad y seguridad del código, mientras que Grype nos permitió buscar vulnerabilidades en las imágenes Docker. Ambas herramientas nos ayudan a detectar posibles problemas antes de desplegar la aplicación.
+
+**¿Por qué hay aprobación manual en production y no en staging?**
+
+Porque en producción necesitamos asegurarnos de que los cambios estén correctos antes de desplegarlos. En staging, en cambio, buscamos que las pruebas se realicen de forma más rápida y automática.
+
+**¿Por qué Supabase en production, pero PostgreSQL local en staging?**
+
+Usamos PostgreSQL local en staging para realizar pruebas sin afectar los datos de producción. En producción utilizamos Supabase porque nos facilita la administración de la base de datos y su disponibilidad.
+
+**¿Por qué las contraseñas van en GitHub Secrets?**
+
+Porque así evitamos dejar las contraseñas directamente en el código o en el repositorio. GitHub Secrets permite que el pipeline utilice esas credenciales de forma más segura cuando las necesita.
 
 ---
 
 # 20. Declaración de uso de Inteligencia Artificial
 
-> _A completar por el equipo: qué herramientas de IA se usaron, para qué partes del trabajo y cómo se revisó y validó el contenido generado. Citar según https://bibliotecas.duoc.cl/ia_
+Durante esta evaluación se utilizó **Claude (Anthropic)** como asistente en las siguientes partes del trabajo:
+
+* Generación y corrección de los archivos de configuración del pipeline (`ci-cd.yml`, `deploy.yml`), el `Dockerfile`, `docker-compose.yml`, la configuración de Nginx y los scripts de smoke test y despliegue en EC2.
+* Creación de pruebas unitarias adicionales (`PokemonControllerTest`) para alcanzar la cobertura mínima.
+* Diagnóstico de errores del pipeline (Quality Gate de SonarCloud, vulnerabilidades detectadas por Grype, fallos de los smoke tests y de la conexión SSH).
+* Guía paso a paso para configurar SonarCloud, Supabase, la instancia AWS EC2 y los GitHub Secrets.
+* Redacción de las secciones técnicas 10 a 18 de este README.
+
+**Validación:** todo el contenido generado fue ejecutado y verificado por el equipo: las pruebas se corrieron localmente (`mvn verify`), el stack se levantó con Docker Compose y se probó con los smoke tests, y el pipeline completo terminó en verde en GitHub Actions, incluido el despliegue en AWS EC2 con Supabase. Los errores que aparecieron se corrigieron y se volvieron a probar.
+
+Las secciones 19 (justificación de decisiones técnicas) y 21 (conclusiones y reflexiones individuales) fueron escritas por el equipo sin apoyo de IA, según lo exige la pauta.
+
+Referencia: Anthropic. (2026). *Claude* [Modelo de lenguaje de gran tamaño]. https://claude.ai
 
 ---
 
 # 21. Conclusiones y reflexiones individuales
 
-> _A completar por cada integrante, sin apoyo de IA (requisito de la pauta)._
-
 ### Diego Araya
 
-### Leonardo Mendez
+- **Lo que más costó:** Explicar las dificultades de implementar el cd, los problemas que pasaron en la configuración y como lo solucionamos
+- **Lo que aprendí:** El como automatizar permite entender mejor la idea de integración y despliegue continuo, reduciendo la intervención manual
+- **Qué mejoraría:** Un sistema de monitoreo de los recursos en AWS, se podría ver el consumo de la CPU, memoria y otros recursos, esto serviría para optimizar recursos
+
+### Leonardo Méndez
+
+- **Lo que más costó:** La configuración de SonarQube
+- **Lo que aprendí:** El como las buenas practicas mejora la calidad de nuestro proyecto
+- **Qué mejoraría:** Implementar ECS para la orquestación y administración de contenedores
 
 ### Cristopher López
+
+- **Lo que más costó:** Docker, su configuración de entorno, las dependencias y errores durante la construcción
+- **Lo que aprendí:** El como CI CD permite entender mejor la automatización de las pruebas, construcción de imágenes y el despliegue de aplicaciones
+- **Qué mejoraría:** Un balanceador de carga permitiría distribuir las solicitudes entre varias instancias de la aplicacion
