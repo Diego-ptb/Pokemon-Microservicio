@@ -358,3 +358,138 @@ jobs:
       image-ref: ${{ needs.docker.outputs.image-ref }}
       digest: ${{ needs.docker.outputs.digest }}
       replicas: 3
+      use-supabase: true
+    secrets:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      SUPABASE_DB_USER: ${{ secrets.SUPABASE_DB_USER }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+  # -------------------------------------------------------------------
+  # 6. Despliegue en AWS EC2 (nube real del laboratorio AWS Academy)
+  #    Corre después de que production pasó en el entorno simulado.
+  #    Secrets: EC2_HOST (IP pública) y EC2_SSH_KEY (llave privada .pem).
+  #    Variable opcional: EC2_USER (por defecto ec2-user; en Ubuntu: ubuntu).
+  #    Si los Secrets no existen, el job se omite con un aviso (no falla).
+  # -------------------------------------------------------------------
+  deploy-ec2:
+    name: 6 · Deploy AWS EC2
+    needs: [docker, deploy-production]
+    if: always() && needs.deploy-production.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: aws-ec2
+    concurrency:
+      group: deploy-aws-ec2
+      cancel-in-progress: false
+    env:
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_USER: ${{ vars.EC2_USER || 'ec2-user' }}
+      APP_IMAGE: ${{ needs.docker.outputs.image-ref }}
+      EC2_PORT: "80"
+      EC2_REPLICAS: ${{ vars.EC2_APP_REPLICAS || '2' }}
+    steps:
+      - name: Verificar configuración de EC2
+        id: check
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          if [ -z "$EC2_HOST" ] || [ -z "$EC2_SSH_KEY" ]; then
+            echo "::warning::EC2 no configurado (faltan los secrets EC2_HOST y/o EC2_SSH_KEY): se omite el despliegue en AWS"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "## Deploy AWS EC2 omitido: faltan los secrets EC2_HOST / EC2_SSH_KEY" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Descargar configuración de despliegue
+        if: steps.check.outputs.configured == 'true'
+        uses: actions/checkout@v5
+
+      - name: Configurar llave SSH
+        if: steps.check.outputs.configured == 'true'
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" | tr -d '\r' > ~/.ssh/ec2.pem
+          chmod 600 ~/.ssh/ec2.pem
+          ssh-keyscan -T 15 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          {
+            echo "Host ec2"
+            echo "  HostName $EC2_HOST"
+            echo "  User $EC2_USER"
+            echo "  IdentityFile ~/.ssh/ec2.pem"
+            echo "  ServerAliveInterval 30"
+          } >> ~/.ssh/config
+          ssh ec2 'echo "Conexión SSH OK: $(hostname)"'
+
+      - name: Copiar archivos de despliegue a la instancia
+        if: steps.check.outputs.configured == 'true'
+        run: |
+          ssh ec2 'mkdir -p ~/pokemon/deploy/nginx ~/pokemon/scripts'
+          scp docker-compose.yml docker-compose.supabase.yml schema.sql ec2:~/pokemon/
+          scp deploy/nginx/default.conf ec2:~/pokemon/deploy/nginx/
+          scp scripts/ec2-deploy.sh ec2:~/pokemon/scripts/
+
+      - name: Enviar credenciales de Supabase a la instancia
+        if: steps.check.outputs.configured == 'true'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_DB_USER: ${{ secrets.SUPABASE_DB_USER }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          # Se envían por stdin (no quedan en el log ni en la línea de comandos)
+          if [ -n "$SUPABASE_DB_URL" ] && [ -n "$SUPABASE_DB_USER" ] && [ -n "$SUPABASE_DB_PASSWORD" ]; then
+            printf 'SUPABASE_DB_URL=%s\nSUPABASE_DB_USER=%s\nSUPABASE_DB_PASSWORD=%s\n' \
+              "$SUPABASE_DB_URL" "$SUPABASE_DB_USER" "$SUPABASE_DB_PASSWORD" \
+              | ssh ec2 'umask 077; cat > ~/pokemon/.env.supabase'
+            echo "DB_MODE=supabase" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Faltan los secrets de Supabase: la instancia EC2 usará PostgreSQL local"
+            ssh ec2 'rm -f ~/pokemon/.env.supabase'
+            echo "DB_MODE=local" >> "$GITHUB_ENV"
+          fi
+
+      - name: Desplegar en EC2
+        if: steps.check.outputs.configured == 'true'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Las variables se expanden a propósito en el runner antes de enviarse por SSH.
+          # 1) Instala Docker y Compose si la instancia no los tiene
+          ssh ec2 'bash ~/pokemon/scripts/ec2-deploy.sh --instalar'
+          # 2) Sesión en GHCR para descargar la imagen (el token va por stdin, no queda en el log)
+          # shellcheck disable=SC2029
+          printf '%s' "$GHCR_TOKEN" | ssh ec2 "sudo docker login ghcr.io -u '${GITHUB_ACTOR}' --password-stdin"
+          # 3) Despliegue con la imagen exacta que pasó las pruebas y el escaneo
+          # shellcheck disable=SC2029
+          ssh ec2 "bash ~/pokemon/scripts/ec2-deploy.sh '${APP_IMAGE}' '${GITHUB_SHA}' '${EC2_REPLICAS}' '${EC2_PORT}' '${DB_MODE}'"
+
+      - name: Smoke tests contra la instancia EC2
+        if: steps.check.outputs.configured == 'true'
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          BASE_URL="http://${EC2_HOST}:${EC2_PORT}" EXPECTED_REPLICAS="$EC2_REPLICAS" bash scripts/smoke-test.sh
+
+      - name: Registro de trazabilidad (EC2)
+        if: always() && steps.check.outputs.configured == 'true'
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Despliegue en AWS EC2"
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| Estado | ${JOB_STATUS} |"
+            echo "| Commit | \`${GITHUB_SHA::7}\` |"
+            echo "| Imagen | \`${APP_IMAGE}\` |"
+            echo "| Réplicas | ${EC2_REPLICAS} |"
+            echo "| Base de datos | ${DB_MODE:-n/a} |"
+            echo "| Fecha (UTC) | $(date -u +'%Y-%m-%d %H:%M:%S') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          ssh ec2 'cd ~/pokemon && sudo docker compose -f docker-compose.yml $( [ -f .use-supabase ] && echo -f docker-compose.supabase.yml ) ps' || true

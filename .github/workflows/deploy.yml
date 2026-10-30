@@ -29,6 +29,18 @@ on:
         required: false
         type: number
         default: 2
+      use-supabase:
+        description: Usar la base de datos en la nube (Supabase) en vez del PostgreSQL local
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      SUPABASE_DB_URL:
+        required: false
+      SUPABASE_DB_USER:
+        required: false
+      SUPABASE_DB_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -67,6 +79,11 @@ jobs:
       # La contraseña de la BD se genera en cada despliegue y nunca se
       # escribe en el repositorio ni aparece en los logs (se enmascara).
       - name: Preparar variables del entorno
+        env:
+          USE_SUPABASE: ${{ inputs.use-supabase }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_DB_USER: ${{ secrets.SUPABASE_DB_USER }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           DB_PASS="$(openssl rand -hex 24)"
           echo "::add-mask::${DB_PASS}"
@@ -75,6 +92,22 @@ jobs:
             echo "POSTGRES_DB=pokemon"
             echo "POSTGRES_USER=pokemon"
           } > .env
+          # Producción usa la base en la nube (Supabase) si sus secrets existen
+          if [ "$USE_SUPABASE" = "true" ] && [ -n "$SUPABASE_DB_URL" ] && [ -n "$SUPABASE_DB_USER" ] && [ -n "$SUPABASE_DB_PASSWORD" ]; then
+            {
+              echo "SUPABASE_DB_URL=${SUPABASE_DB_URL}"
+              echo "SUPABASE_DB_USER=${SUPABASE_DB_USER}"
+              echo "SUPABASE_DB_PASSWORD=${SUPABASE_DB_PASSWORD}"
+            } >> .env
+            # COMPOSE_FILE hace que todos los "docker compose" siguientes usen ambos archivos
+            echo "COMPOSE_FILE=docker-compose.yml:docker-compose.supabase.yml" >> "$GITHUB_ENV"
+            echo "DB_PROVIDER=Supabase (nube)" >> "$GITHUB_ENV"
+          else
+            if [ "$USE_SUPABASE" = "true" ]; then
+              echo "::warning::Faltan los secrets de Supabase (SUPABASE_DB_URL, SUPABASE_DB_USER, SUPABASE_DB_PASSWORD): se usa PostgreSQL local"
+            fi
+            echo "DB_PROVIDER=PostgreSQL en contenedor" >> "$GITHUB_ENV"
+          fi
           docker compose config --quiet
 
       - name: Descargar imagen ${{ inputs.image-ref }}
@@ -142,6 +175,7 @@ jobs:
             echo "| Digest | \`${image_id}\` |"
             echo "| Revisión en la imagen (label OCI) | \`${revision}\` |"
             echo "| Réplicas | ${APP_REPLICAS} |"
+            echo "| Base de datos | ${DB_PROVIDER:-n/a} |"
             echo "| Ejecución | [#${GITHUB_RUN_NUMBER}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) |"
             echo "| Fecha (UTC) | $(date -u +'%Y-%m-%d %H:%M:%S') |"
             echo
