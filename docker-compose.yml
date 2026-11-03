@@ -25,7 +25,7 @@ services:
   # Base de datos
   # ------------------------------------------------------------------
   db:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-pokemon}
