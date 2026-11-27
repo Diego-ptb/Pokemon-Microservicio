@@ -1,0 +1,564 @@
+{
+  "start": "-PT3H",
+  "periodOverride": "inherit",
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 24,
+      "height": 2,
+      "properties": {
+        "markdown": "# Pokémon Service · Observabilidad DevOps\nMicroservicio en **AWS EC2** (Docker Compose: gateway Nginx + réplicas + base de datos). Fuentes: health check cada 1 min, CloudWatch Agent (CPU/memoria/disco), logs de contenedores (filtros de métricas) y métricas que publica el pipeline CI/CD en cada despliegue."
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 2,
+      "width": 4,
+      "height": 4,
+      "properties": {
+        "title": "Disponibilidad (1 = arriba)",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "Pokemon/App",
+            "Disponibilidad",
+            {
+              "stat": "Minimum",
+              "label": "Disponibilidad"
+            }
+          ]
+        ],
+        "view": "singleValue",
+        "stacked": false,
+        "period": 300,
+        "sparkline": true
+      }
+    },
+    {
+      "type": "metric",
+      "x": 4,
+      "y": 2,
+      "width": 4,
+      "height": 4,
+      "properties": {
+        "title": "Réplicas sanas",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "Pokemon/App",
+            "ReplicasSanas",
+            {
+              "stat": "Minimum",
+              "label": "Réplicas"
+            }
+          ]
+        ],
+        "view": "singleValue",
+        "stacked": false,
+        "period": 300,
+        "sparkline": true
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 2,
+      "width": 4,
+      "height": 4,
+      "properties": {
+        "title": "Cobertura de pruebas (%)",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "Pokemon/CICD",
+            "CoberturaPruebas",
+            {
+              "stat": "Maximum",
+              "label": "Líneas"
+            }
+          ]
+        ],
+        "view": "singleValue",
+        "stacked": false,
+        "period": 3600,
+        "sparkline": true,
+        "start": "-P30D"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 2,
+      "width": 4,
+      "height": 4,
+      "properties": {
+        "title": "Tiempo de despliegue EC2 (s)",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "Pokemon/CICD",
+            "TiempoDespliegue",
+            {
+              "stat": "Maximum",
+              "label": "Último"
+            }
+          ]
+        ],
+        "view": "singleValue",
+        "stacked": false,
+        "period": 3600,
+        "sparkline": true,
+        "start": "-P30D"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16,
+      "y": 2,
+      "width": 4,
+      "height": 4,
+      "properties": {
+        "title": "Duración del pipeline (min)",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "Pokemon/CICD",
+            "DuracionPipeline",
+            {
+              "stat": "Maximum",
+              "label": "Último"
+            }
+          ]
+        ],
+        "view": "singleValue",
+        "stacked": false,
+        "period": 3600,
+        "sparkline": true,
+        "start": "-P30D"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 20,
+      "y": 2,
+      "width": 4,
+      "height": 4,
+      "properties": {
+        "title": "Errores registrados (última hora)",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "Pokemon/App",
+            "ErroresApp",
+            {
+              "stat": "Sum",
+              "label": "App (ERROR)"
+            }
+          ],
+          [
+            "Pokemon/App",
+            "Errores5xx",
+            {
+              "stat": "Sum",
+              "label": "HTTP 5xx"
+            }
+          ]
+        ],
+        "view": "singleValue",
+        "stacked": false,
+        "period": 3600,
+        
+        "start": "-PT1H"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 6,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "CPU (%)",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "AWS/EC2",
+            "CPUUtilization",
+            "InstanceId",
+            "__INSTANCE_ID__",
+            {
+              "label": "Instancia (EC2)"
+            }
+          ],
+          [
+            "Pokemon/EC2",
+            "cpu_usage_active",
+            "InstanceId",
+            "__INSTANCE_ID__",
+            {
+              "label": "Instancia (agente)"
+            }
+          ],
+          [
+            "Pokemon/App",
+            "CPUContenedoresApp",
+            {
+              "label": "Réplicas de la app"
+            }
+          ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "stat": "Average",
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 100
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "Alarma 80 %",
+              "value": 80,
+              "color": "#d62728"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 6,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "Memoria",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "Pokemon/EC2",
+            "mem_used_percent",
+            "InstanceId",
+            "__INSTANCE_ID__",
+            {
+              "label": "Instancia (% usado)"
+            }
+          ],
+          [
+            "Pokemon/EC2",
+            "used_percent",
+            "InstanceId",
+            "__INSTANCE_ID__",
+            {
+              "label": "Disco / (% usado)"
+            }
+          ],
+          [
+            "Pokemon/App",
+            "MemoriaContenedoresAppMB",
+            {
+              "label": "Réplicas de la app (MB)",
+              "yAxis": "right"
+            }
+          ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "stat": "Average",
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 100,
+            "label": "%"
+          },
+          "right": {
+            "min": 0,
+            "label": "MB"
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "Alarma 85 %",
+              "value": 85,
+              "color": "#d62728"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16,
+      "y": 6,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "Disponibilidad y tiempo de respuesta",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "Pokemon/App",
+            "Disponibilidad",
+            {
+              "stat": "Minimum",
+              "label": "Disponibilidad (0/1)"
+            }
+          ],
+          [
+            "Pokemon/App",
+            "TiempoRespuestaMs",
+            {
+              "stat": "Average",
+              "label": "Respuesta health (ms)",
+              "yAxis": "right"
+            }
+          ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 1.2
+          },
+          "right": {
+            "min": 0
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 12,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "Errores registrados (cada 5 min)",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "Pokemon/App",
+            "ErroresApp",
+            {
+              "label": "Logs ERROR (app)",
+              "color": "#d62728"
+            }
+          ],
+          [
+            "Pokemon/App",
+            "Errores5xx",
+            {
+              "label": "Respuestas 5xx (gateway)",
+              "color": "#ff7f0e"
+            }
+          ],
+          [
+            "Pokemon/App",
+            "Errores4xx",
+            {
+              "label": "Respuestas 4xx (gateway)",
+              "color": "#bcbd22"
+            }
+          ],
+          [
+            "Pokemon/App",
+            "AdvertenciasApp",
+            {
+              "label": "Logs WARN (app)",
+              "color": "#9467bd"
+            }
+          ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 300,
+        "stat": "Sum"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 12,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "Tráfico y latencia del gateway",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "Pokemon/App",
+            "Peticiones",
+            {
+              "stat": "Sum",
+              "label": "Peticiones / 5 min"
+            }
+          ],
+          [
+            "Pokemon/App",
+            "LatenciaGateway",
+            {
+              "stat": "p90",
+              "label": "Latencia p90 (s)",
+              "yAxis": "right"
+            }
+          ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 300,
+        "yAxis": {
+          "left": {
+            "min": 0
+          },
+          "right": {
+            "min": 0
+          }
+        }
+      }
+    },
+    {
+      "type": "alarm",
+      "x": 16,
+      "y": 12,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "Estado de alarmas",
+        "alarms": [
+          "arn:aws:cloudwatch:__REGION__:__ACCOUNT_ID__:alarm:Pokemon-Disponibilidad",
+          "arn:aws:cloudwatch:__REGION__:__ACCOUNT_ID__:alarm:Pokemon-Errores5xx",
+          "arn:aws:cloudwatch:__REGION__:__ACCOUNT_ID__:alarm:Pokemon-ErroresApp",
+          "arn:aws:cloudwatch:__REGION__:__ACCOUNT_ID__:alarm:Pokemon-CPU-Alta",
+          "arn:aws:cloudwatch:__REGION__:__ACCOUNT_ID__:alarm:Pokemon-Memoria-Alta"
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 18,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "CI/CD · tiempos por despliegue a producción (30 días)",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "Pokemon/CICD",
+            "TiempoDespliegue",
+            {
+              "label": "Despliegue en EC2 (s)"
+            }
+          ],
+          [
+            "Pokemon/CICD",
+            "DuracionPipeline",
+            {
+              "label": "Pipeline completo (min)",
+              "yAxis": "right"
+            }
+          ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 3600,
+        "stat": "Maximum",
+        "start": "-P30D",
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "label": "s"
+          },
+          "right": {
+            "min": 0,
+            "label": "min"
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 18,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "CI/CD · cobertura y resultado de despliegues (30 días)",
+        "region": "__REGION__",
+        "metrics": [
+          [
+            "Pokemon/CICD",
+            "CoberturaPruebas",
+            {
+              "label": "Cobertura líneas (%)"
+            }
+          ],
+          [
+            "Pokemon/CICD",
+            "CoberturaRamas",
+            {
+              "label": "Cobertura ramas (%)"
+            }
+          ],
+          [
+            "Pokemon/CICD",
+            "DespliegueExitoso",
+            {
+              "label": "Despliegue exitoso (1/0)",
+              "yAxis": "right",
+              "stat": "Minimum"
+            }
+          ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 3600,
+        "stat": "Maximum",
+        "start": "-P30D",
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 100,
+            "label": "%"
+          },
+          "right": {
+            "min": 0,
+            "max": 1.2
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "Mínimo exigido 80 %",
+              "value": 80,
+              "color": "#d62728"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 24,
+      "width": 24,
+      "height": 6,
+      "properties": {
+        "title": "Últimos errores en los logs de la app",
+        "region": "__REGION__",
+        "view": "table",
+        "query": "SOURCE '/pokemon/app' | fields @timestamp, @logStream as replica, @message\n| filter @message like /ERROR/\n| sort @timestamp desc\n| limit 20"
+      }
+    }
+  ]
+}

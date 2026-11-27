@@ -8,6 +8,8 @@
 #
 # - Instala Docker y Docker Compose si la instancia no los tiene
 #   (Amazon Linux o Ubuntu).
+# - Si CloudWatch está habilitado (.cloudwatch-enabled), agrega
+#   docker-compose.cloudwatch.yml para enviar los logs a CloudWatch Logs.
 # - Mantiene la contraseña de la base entre despliegues (vive en .env
 #   de la instancia, nunca en el repositorio).
 # - Levanta el mismo docker-compose.yml que se usa en local y en staging,
@@ -81,6 +83,17 @@ if [ "$DB_MODE" = "supabase" ] && [ -f .env.supabase ]; then
 else
   rm -f .use-supabase
   echo "Base de datos: PostgreSQL local"
+fi
+
+# Observabilidad: si monitoring/setup-cloudwatch.sh habilitó CloudWatch
+# (la instancia tiene rol IAM), los logs de los contenedores van a CloudWatch Logs
+sed -i '/^AWS_REGION=/d' .env
+if [ -f .cloudwatch-enabled ]; then
+  cat .cloudwatch-enabled >> .env
+  COMPOSE+=(-f docker-compose.cloudwatch.yml)
+  echo "Logs: CloudWatch Logs (/pokemon/app, /pokemon/gateway, /pokemon/db)"
+else
+  echo "Logs: locales en la instancia (sin CloudWatch)"
 fi
 
 echo "==> Descargando imagen ${IMAGE}"

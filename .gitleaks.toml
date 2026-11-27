@@ -1,0 +1,17 @@
+# =====================================================================
+# Política de secretos (Gitleaks) — job "0 · Auditoría de cumplimiento"
+#
+# Usa todas las reglas por defecto de Gitleaks (llaves de AWS, tokens de
+# GitHub, llaves privadas, contraseñas en URLs JDBC, etc.). Si encuentra
+# un secreto en el código, el pipeline se detiene.
+# =====================================================================
+title = "Política de secretos - pokemon-service"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Plantillas con valores de ejemplo (no son secretos reales)"
+paths = [
+  '''\.env\.example$''',
+]

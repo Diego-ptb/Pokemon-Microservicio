@@ -1,5 +1,6 @@
 package com.pokemon.exception;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -25,6 +26,7 @@ import java.util.Map;
  *                        validación fallida)
  *                        3. Exception genérica (500 Internal Server Error)
  */
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -37,6 +39,7 @@ public class GlobalExceptionHandler {
             ResourceNotFoundException ex,
             WebRequest request) {
 
+        log.warn("Recurso no encontrado: {}", ex.getMessage());
         ErrorResponse errorResponse = new ErrorResponse(
                 HttpStatus.NOT_FOUND.value(),
                 ex.getMessage(),
@@ -81,6 +84,8 @@ public class GlobalExceptionHandler {
             Exception ex,
             WebRequest request) {
 
+        // Queda en CloudWatch Logs como ERROR (con stack trace) y suma a la métrica ErroresApp
+        log.error("Error no controlado en {}", request.getDescription(false), ex);
         ErrorResponse errorResponse = new ErrorResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 "Error interno del servidor: " + ex.getMessage(),

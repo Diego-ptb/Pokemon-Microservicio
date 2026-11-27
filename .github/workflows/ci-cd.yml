@@ -1,16 +1,20 @@
 # =====================================================================
 # Pipeline CI/CD — pokemon-service
 #
-#  push / PR ─► 1. Build + pruebas (JUnit + JaCoCo ≥ 80%)          [IE2]
-#            ─► 2. Análisis de código SonarCloud (quality gate)     [IE3]
-#            ─► 3. Revisión de dependencias (solo PR)               [IE3]
+#  push / PR ─► 0. Auditoría de cumplimiento (Gitleaks + políticas)  [EP3 IE5/IE6]
+#            ─► 1. Build + pruebas (JUnit + JaCoCo ≥ 80%)
+#            ─► 2. Análisis de código SonarCloud (quality gate)     [EP3 IE5/IE6]
+#            ─► 3. Revisión de dependencias (solo PR)
 #                     │  (si cualquiera falla, el pipeline se detiene)
 #                     ▼
-#               4. Imagen Docker: lint + build + escaneo Grype       [IE1][IE3]
-#                  + publicación en GHCR con tag del commit         [IE4]
+#               4. Imagen Docker: lint + build + escaneo Grype
+#                  + publicación en GHCR con tag del commit
 #                     ▼
-#               5. Despliegue automático (Docker Compose) + smoke    [IE4][IE5]
+#               5. Despliegue automático (Docker Compose) + smoke
 #                  develop ─► staging      main ─► production
+#                     ▼
+#               6. Deploy AWS EC2 + observabilidad CloudWatch      [EP3 IE1/IE3]
+#                  (logs, métricas, alarmas, dashboard y métricas del pipeline)
 # =====================================================================
 name: CI/CD Pokemon Service
 
@@ -36,12 +40,43 @@ env:
 
 jobs:
   # -------------------------------------------------------------------
+  # 0. Auditoría automatizada de cumplimiento (políticas de seguridad)
+  #    - Gitleaks: busca secretos en el código (llaves, tokens, contraseñas)
+  #    - scripts/audit-compliance.sh: políticas del repositorio
+  #      (sin .env/.pem, contenedor sin root, cobertura mínima, etc.)
+  #    Si algo falla, no se construye la imagen ni se despliega.
+  # -------------------------------------------------------------------
+  compliance:
+    name: 0 · Auditoría de cumplimiento
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v7
+
+      - name: Buscar secretos en el código (Gitleaks)
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.18.4 \
+            detect --no-git --source /repo --config /repo/.gitleaks.toml --redact --verbose \
+          || { echo "::error::Gitleaks encontró posibles secretos en el código (ver detalle arriba)"; \
+               echo "## ❌ Gitleaks: se encontraron secretos en el código" >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+          echo "## ✅ Gitleaks: sin secretos en el código" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Políticas de cumplimiento del repositorio
+        run: bash scripts/audit-compliance.sh
+
+  # -------------------------------------------------------------------
   # 1. Compilación y pruebas unitarias con política de cobertura
   # -------------------------------------------------------------------
   build-test:
     name: 1 · Build y pruebas unitarias
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Se entregan al job de EC2, que las publica en CloudWatch (dashboard)
+    outputs:
+      coverage-lines: ${{ steps.metricas.outputs.lines }}
+      coverage-branches: ${{ steps.metricas.outputs.branches }}
+      tests-total: ${{ steps.metricas.outputs.tests }}
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v7
@@ -80,6 +115,20 @@ jobs:
               print(f"- Ramas: **{100*bc/max(bc+bm,1):.1f}%**")
           except FileNotFoundError:
               print("\n_No se generó reporte de cobertura._")
+          EOF
+
+      - name: Calcular métricas de calidad (para el dashboard)
+        id: metricas
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import csv, glob, xml.etree.ElementTree as ET
+          t = sum(int(ET.parse(p).getroot().get("tests", 0)) for p in glob.glob("target/surefire-reports/TEST-*.xml"))
+          rows = list(csv.DictReader(open("target/site/jacoco/jacoco.csv")))
+          lm = sum(int(r["LINE_MISSED"]) for r in rows); lc = sum(int(r["LINE_COVERED"]) for r in rows)
+          bm = sum(int(r["BRANCH_MISSED"]) for r in rows); bc = sum(int(r["BRANCH_COVERED"]) for r in rows)
+          print(f"lines={100*lc/max(lc+lm,1):.1f}")
+          print(f"branches={100*bc/max(bc+bm,1):.1f}")
+          print(f"tests={t}")
           EOF
 
       - name: Publicar reportes de pruebas y cobertura
@@ -187,12 +236,13 @@ jobs:
   # -------------------------------------------------------------------
   docker:
     name: 4 · Imagen Docker (build, escaneo, publicación)
-    needs: [build-test, sonar]
-    # Requiere pruebas OK y Sonar OK. Sonar solo puede omitirse fuera de main
+    needs: [compliance, build-test, sonar]
+    # Requiere auditoría OK, pruebas OK y Sonar OK. Sonar solo puede omitirse fuera de main
     # (push a develop, cuyo código ya pasó el Quality Gate en su PR, o PRs de Dependabot).
     # En main el Quality Gate es SIEMPRE obligatorio.
     if: >-
       always() &&
+      needs.compliance.result == 'success' &&
       needs.build-test.result == 'success' &&
       (needs.sonar.result == 'success' || (needs.sonar.result == 'skipped' && github.ref != 'refs/heads/main'))
     runs-on: ubuntu-latest
@@ -370,16 +420,23 @@ jobs:
   #    Secrets: EC2_HOST (IP pública) y EC2_SSH_KEY (llave privada .pem).
   #    Variable opcional: EC2_USER (por defecto ec2-user; en Ubuntu: ubuntu).
   #    Si los Secrets no existen, el job se omite con un aviso (no falla).
+  #
+  #    EP3 · Observabilidad: antes de levantar los contenedores configura
+  #    CloudWatch en la instancia (monitoring/setup-cloudwatch.sh) y al
+  #    final publica las métricas del pipeline (tiempo de despliegue,
+  #    cobertura, duración) para el dashboard "Pokemon-DevOps".
+  #    Secret opcional: ALERT_EMAIL (correo que recibe las alarmas).
   # -------------------------------------------------------------------
   deploy-ec2:
     name: 6 · Deploy AWS EC2
-    needs: [docker, deploy-production]
+    needs: [build-test, docker, deploy-production]
     if: always() && needs.deploy-production.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
       contents: read
       packages: read
+      actions: read            # leer la hora de inicio del pipeline (métrica de duración)
     environment:
       name: aws-ec2
     concurrency:
@@ -392,6 +449,9 @@ jobs:
       EC2_PORT: "80"
       EC2_REPLICAS: ${{ vars.EC2_APP_REPLICAS || '2' }}
     steps:
+      - name: Registrar inicio del despliegue
+        run: echo "DEPLOY_START=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Verificar configuración de EC2
         id: check
         env:
@@ -430,8 +490,9 @@ jobs:
       - name: Copiar archivos de despliegue a la instancia
         if: steps.check.outputs.configured == 'true'
         run: |
-          ssh ec2 'mkdir -p ~/pokemon/deploy/nginx ~/pokemon/scripts'
-          scp docker-compose.yml docker-compose.supabase.yml schema.sql ec2:~/pokemon/
+          ssh ec2 'mkdir -p ~/pokemon/deploy/nginx ~/pokemon/scripts ~/pokemon/monitoring'
+          scp docker-compose.yml docker-compose.supabase.yml docker-compose.cloudwatch.yml schema.sql ec2:~/pokemon/
+          scp monitoring/* ec2:~/pokemon/monitoring/
           scp deploy/nginx/default.conf ec2:~/pokemon/deploy/nginx/
           scp scripts/ec2-deploy.sh ec2:~/pokemon/scripts/
 
@@ -454,6 +515,16 @@ jobs:
             echo "DB_MODE=local" >> "$GITHUB_ENV"
           fi
 
+      # Agente de CloudWatch, grupos de logs, filtros de métricas, health check,
+      # alarmas (SNS) y dashboard. Usa el rol IAM de la instancia, sin llaves.
+      - name: Configurar observabilidad (CloudWatch)
+        if: steps.check.outputs.configured == 'true'
+        env:
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+        run: |
+          # shellcheck disable=SC2029
+          ssh ec2 "bash ~/pokemon/monitoring/setup-cloudwatch.sh '${ALERT_EMAIL}' '${EC2_PORT}'"
+
       - name: Desplegar en EC2
         if: steps.check.outputs.configured == 'true'
         env:
@@ -475,6 +546,45 @@ jobs:
           EXPECTED_COMMIT: ${{ github.sha }}
         run: |
           BASE_URL="http://${EC2_HOST}:${EC2_PORT}" EXPECTED_REPLICAS="$EC2_REPLICAS" bash scripts/smoke-test.sh
+
+      # Métricas del proceso CI/CD para el dashboard (namespace Pokemon/CICD)
+      - name: Publicar métricas del pipeline en CloudWatch
+        if: always() && steps.check.outputs.configured == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+          COV_LINES: ${{ needs.build-test.outputs.coverage-lines }}
+          COV_BRANCHES: ${{ needs.build-test.outputs.coverage-branches }}
+          TESTS_TOTAL: ${{ needs.build-test.outputs.tests-total }}
+        run: |
+          AHORA=$(date +%s)
+          INICIO_RUN=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq .run_started_at)
+          DURACION_MIN=$(( (AHORA - $(date -d "$INICIO_RUN" +%s)) / 60 ))
+          if [ "$JOB_STATUS" = "success" ]; then
+            EXITO=1; TIEMPO_DEPLOY=$(( AHORA - DEPLOY_START ))
+          else
+            EXITO=0; TIEMPO_DEPLOY=""
+          fi
+          # shellcheck disable=SC2029
+          ssh ec2 "bash ~/pokemon/monitoring/publicar-metricas-cicd.sh \
+            TiempoDespliegue=${TIEMPO_DEPLOY}:Seconds \
+            DuracionPipeline=${DURACION_MIN}:None \
+            CoberturaPruebas=${COV_LINES}:Percent \
+            CoberturaRamas=${COV_BRANCHES}:Percent \
+            PruebasTotales=${TESTS_TOTAL}:Count \
+            DespliegueExitoso=${EXITO}:Count"
+          {
+            echo "## Métricas enviadas a CloudWatch (Pokemon/CICD)"
+            echo "| Métrica | Valor |"
+            echo "|---|---|"
+            echo "| Tiempo de despliegue en EC2 | ${TIEMPO_DEPLOY:-n/a} s |"
+            echo "| Duración del pipeline (incluye aprobación manual) | ${DURACION_MIN} min |"
+            echo "| Cobertura de líneas / ramas | ${COV_LINES:-n/a}% / ${COV_BRANCHES:-n/a}% |"
+            echo "| Pruebas ejecutadas | ${TESTS_TOTAL:-n/a} |"
+            echo "| Despliegue exitoso | ${EXITO} |"
+            echo "| Dashboard | CloudWatch > Dashboards > **Pokemon-DevOps** |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Registro de trazabilidad (EC2)
         if: always() && steps.check.outputs.configured == 'true'

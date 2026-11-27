@@ -1,0 +1,48 @@
+# =====================================================================
+# Variante para AWS EC2: los logs de los contenedores van a CloudWatch Logs
+#
+# Se combina con docker-compose.yml (y opcionalmente con el de Supabase):
+#   docker compose -f docker-compose.yml -f docker-compose.cloudwatch.yml up -d
+#
+# El driver "awslogs" de Docker envía cada línea de log a CloudWatch usando
+# el rol IAM de la instancia (LabInstanceProfile): no hay llaves en el repo
+# ni en la instancia. Cada réplica escribe en su propio stream
+# (pokemon-app-1, pokemon-app-2, ...), así se sabe qué réplica falló.
+#
+# Grupos de logs (los crea monitoring/setup-cloudwatch.sh, con retención):
+#   /pokemon/app      -> logs de Spring Boot (INFO/WARN/ERROR)
+#   /pokemon/gateway  -> accesos de Nginx en JSON (status, latencia)
+#   /pokemon/db       -> PostgreSQL local (si no se usa Supabase)
+#
+# Requiere AWS_REGION en .env (lo escribe scripts/ec2-deploy.sh).
+# =====================================================================
+x-awslogs: &awslogs
+  awslogs-region: ${AWS_REGION:?Define AWS_REGION en .env}
+  awslogs-create-group: "true"
+  # Si CloudWatch no responde, el contenedor sigue funcionando
+  # (los logs se guardan en un buffer en vez de bloquear la app)
+  mode: non-blocking
+  max-buffer-size: 4m
+  tag: "{{.Name}}"
+
+services:
+  app:
+    logging:
+      driver: awslogs
+      options:
+        <<: *awslogs
+        awslogs-group: /pokemon/app
+
+  gateway:
+    logging:
+      driver: awslogs
+      options:
+        <<: *awslogs
+        awslogs-group: /pokemon/gateway
+
+  db:
+    logging:
+      driver: awslogs
+      options:
+        <<: *awslogs
+        awslogs-group: /pokemon/db
