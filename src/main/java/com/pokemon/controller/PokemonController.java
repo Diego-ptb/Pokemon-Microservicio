@@ -37,7 +37,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/pokemons")
 @RequiredArgsConstructor
-@Tag(name = "Pokemon", description = "API para gestionar Pokémon")
+@Tag(name = "Pokedex", description = "API para gestionar Pokémon")
 public class PokemonController {
 
         private final PokemonService pokemonService;
