@@ -46,8 +46,10 @@ logging:
     org.hibernate.SQL: ${LOG_LEVEL_SQL:DEBUG}
     # TRACE muestra los valores de los parámetros SQL: útil en desarrollo, no en producción
     org.hibernate.orm.jdbc.bind: ${LOG_LEVEL_SQL_BIND:INFO}
+  # Incluye el nivel (INFO/WARN/ERROR) y la clase: CloudWatch Logs filtra por
+  # "ERROR" para contar los errores registrados (métrica ErroresApp)
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
 
 # Configuración del servidor
 server:
