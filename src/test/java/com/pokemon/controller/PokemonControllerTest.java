@@ -164,7 +164,7 @@ class PokemonControllerTest {
     void unknownPathReturns404() throws Exception {
         mockMvc.perform(get("/favicon.ico"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.status").value(404));
+                .andExpect(jsonPath("$.status").value(999));
     }
 
     @Test
