@@ -160,6 +160,14 @@ class PokemonControllerTest {
     }
 
     @Test
+    @DisplayName("Una ruta inexistente (como /favicon.ico) devuelve 404 y no 500")
+    void unknownPathReturns404() throws Exception {
+        mockMvc.perform(get("/favicon.ico"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404));
+    }
+
+    @Test
     @DisplayName("Un error inesperado devuelve 500 con el formato estándar de error")
     void unexpectedErrorReturns500() throws Exception {
         when(pokemonService.getAllPokemon()).thenThrow(new IllegalStateException("BD caída"));
