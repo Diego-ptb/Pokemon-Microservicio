@@ -169,8 +169,8 @@
         ],
         "view": "singleValue",
         "stacked": false,
-        "period": 3600,
-        
+        "period": 300,
+        "setPeriodToTimeRange": true,
         "start": "-PT1H"
       }
     },
