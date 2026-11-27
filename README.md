@@ -743,14 +743,28 @@ Además, las **reglas de protección de ramas** impiden fusionar un PR a `main` 
 
 ## 23.1 Evidencia
 
-Pruebas realizadas con Pull Requests que introducen fallas a propósito (se cerraron sin fusionar):
+Pruebas con Pull Requests que introducen fallas a propósito (#33 y #34, cerrados sin fusionar) y un caso real detectado al integrar la EP3 (#29):
 
 | Prueba | PR | Resultado |
 |---|---|---|
-| Secreto de prueba en el código | _#_ | _Pendiente: captura del job 0 en rojo y de los jobs siguientes omitidos_ |
-| Prueba unitaria que falla | _#_ | _Pendiente_ |
-| Código que no pasa el Quality Gate | _#_ | _Pendiente_ |
-| Merge bloqueado por la protección de ramas | _#_ | _Pendiente_ |
+| Vulnerabilidad crítica real en la imagen (Tomcat 10.1.61) | [#29](https://github.com/Diego-ptb/Pokemon-Microservicio/pull/29) | Grype detuvo el job 4: la imagen no se publicó ni se desplegó. Se corrigió subiendo `tomcat.version` a 10.1.62. La única crítica restante (CVE-2026-133325, solo clustering TLS-PSK, sin parche publicado) quedó como excepción documentada en `.grype.yaml`. |
+| Prueba unitaria que falla | [#33](https://github.com/Diego-ptb/Pokemon-Microservicio/pull/33) | `expected:<999> but was:<404>`: fallan los jobs 1 y 2; imagen y despliegues omitidos |
+| Secreto de prueba en el código | [#34](https://github.com/Diego-ptb/Pokemon-Microservicio/pull/34) | Gitleaks (`aws-access-token`, valor `REDACTED` en el log) detiene el job 0; imagen y despliegues omitidos |
+| Merge bloqueado por la protección de ramas | #33 y #34 | *Merging is blocked*: faltan checks obligatorios y 1 aprobación (ruleset `proteccion-main-develop`) |
+
+## 23.2 Excepciones documentadas de seguridad
+
+Cuando una vulnerabilidad crítica no aplica al proyecto y todavía no tiene parche publicado, no se desactiva el escaneo: se registra una **excepción explícita** en `.grype.yaml`, con el motivo y cuándo revisarla. Todas las demás vulnerabilidades críticas con parche siguen bloqueando el pipeline.
+
+| CVE | Paquete | Motivo | Revisión |
+|---|---|---|---|
+| CVE-2026-133325 | `tomcat-embed-core` 10.1.62 | Solo afecta al clustering de Tomcat con TLS 1.3 + clave precompartida; la app usa Tomcat embebido sin clustering (el balanceo lo hace Nginx) | Subir a Tomcat 10.1.63 cuando se publique y borrar la excepción |
+
+## 23.3 Error detectado por el monitoreo
+
+Después del primer despliegue con CloudWatch se activaron las alarmas `Pokemon-ErroresApp` y `Pokemon-Errores5xx`. En la tabla de errores del dashboard (Logs Insights) aparecían líneas `ERROR ... Error no controlado en uri=/favicon.ico`: los navegadores piden `/favicon.ico`, la ruta no existe y la aplicación respondía **500** en vez de **404**. El error existía desde la EP2, pero no era visible sin monitoreo.
+
+Corrección (PR #31): `GlobalExceptionHandler` maneja `NoResourceFoundException` y responde 404 (registrado como `WARN`), con la prueba `unknownPathReturns404`. Tras el despliegue, `/favicon.ico` responde 404 y las alarmas volvieron a **OK**.
 
 ---
 
@@ -769,7 +783,7 @@ Pruebas realizadas con Pull Requests que introducen fallas a propósito (se cerr
 
 ## 24.1 Cómo usamos estas métricas para tomar decisiones técnicas
 
-_Pendiente: redactar por el equipo._
+Usamos las métricas porque nos permiten tomar decisiones basadas en datos reales y no en suposiciones. Por ejemplo, con el caso del favicon detectamos errores en los registros de CloudWatch y pudimos corregirlos. En el caso de Tomcat, Grype detectó vulnerabilidades que nos llevaron a actualizar su versión para mejorar la seguridad. En ambos casos, la información obtenida nos ayudó a identificar problemas y decidir cómo solucionarlos antes de que afectaran al proyecto.
 
 ---
 
@@ -816,7 +830,9 @@ Durante esta evaluación se utilizó **Claude (Anthropic)** como asistente en la
 * Guía paso a paso para configurar CloudWatch, el rol IAM de la instancia y las reglas de protección de ramas.
 * Redacción de las secciones técnicas 19 a 24 de este README, excepto la 24.1.
 
-_Pendiente: describir cómo validó el equipo lo generado en la EP3 (pipeline en verde, capturas de CloudWatch, PRs de prueba)._
+También se usó para diagnosticar el bloqueo de Grype en Tomcat, el error del favicon detectado por CloudWatch, y para preparar el guion del video y la unión de sus partes.
+
+**Validación (EP3):** cada cambio pasó por Pull Request y por el pipeline completo hasta production y AWS EC2. En AWS se verificó que llegaran los logs a CloudWatch, que las métricas y el dashboard mostraran datos y que las alarmas cambiaran de estado y enviaran correo por SNS. Las políticas se probaron con los PR #33 y #34, que fallaron como se esperaba. Las correcciones (Tomcat y favicon) se comprobaron en un nuevo despliegue.
 
 Las secciones 24.1 (uso de las métricas para decidir), 25 (justificación de decisiones técnicas) y 27 (conclusiones y reflexiones individuales) fueron escritas por el equipo sin apoyo de IA, según lo exige la pauta.
 
@@ -825,6 +841,8 @@ Referencia: Anthropic. (2026). *Claude* [Modelo de lenguaje de gran tamaño]. ht
 ---
 
 # 27. Conclusiones y reflexiones individuales
+
+## 27.1 Evaluación Parcial N°2
 
 ### Diego Araya
 
@@ -843,3 +861,17 @@ Referencia: Anthropic. (2026). *Claude* [Modelo de lenguaje de gran tamaño]. ht
 - **Lo que más costó:** Docker, su configuración de entorno, las dependencias y errores durante la construcción
 - **Lo que aprendí:** El como CI CD permite entender mejor la automatización de las pruebas, construcción de imágenes y el despliegue de aplicaciones
 - **Qué mejoraría:** Un balanceador de carga permitiría distribuir las solicitudes entre varias instancias de la aplicacion
+
+## 27.2 Evaluación Parcial N°3
+
+### Diego Araya
+
+Yo estuve más enfocado en la parte del monitoreo con CloudWatch, trabajando con los logs, las alarmas y el dashboard. Lo que más aprendí fue que monitorear una aplicación no es solamente revisar si está funcionando, sino también entender qué está pasando internamente y poder reaccionar cuando aparece algún problema. Un ejemplo claro fue el error del favicon, que logramos encontrar gracias a los registros y corregir para evitar que siguiera generando errores. Como mejora, creo que sería bueno agregar más métricas y tener un monitoreo todavía más detallado para anticiparnos a posibles fallas.
+
+### Leonardo Méndez
+
+En mi caso, me encargué principalmente de trabajar en el pipeline de GitHub Actions y en integrar las distintas etapas para que todo funcionara de forma automática. Durante este proyecto aprendí que no basta con que una aplicación funcione, también es importante tener control sobre lo que pasa después de cada cambio. Algo que me llamó bastante la atención fue el tema del monitoreo, porque gracias a eso pudimos detectar problemas que antes pasaban desapercibidos. Si tuviera que mejorar algo, intentaría automatizar todavía más el proceso y dejar más pruebas para detectar errores antes de llegar a producción.
+
+### Cristopher López
+
+Por mi parte, trabajé principalmente en la parte de seguridad y cumplimiento, implementando controles para revisar que los cambios realmente cumplieran con las reglas del proyecto. Aprendí que no sirve de mucho tener un pipeline automatizado si no tenemos controles que eviten que se suban cambios con errores o vulnerabilidades. Algo que demuestra esto fue lo que pasó con Tomcat, donde Grype detectó una vulnerabilidad y tuvimos que actualizar la versión antes de continuar. Si pudiera mejorar algo, reforzaría todavía más las revisiones de seguridad y buscaría mantener las dependencias siempre actualizadas.
