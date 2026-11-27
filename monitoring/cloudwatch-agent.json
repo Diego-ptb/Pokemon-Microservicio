@@ -1,0 +1,41 @@
+{
+  "agent": {
+    "metrics_collection_interval": 60,
+    "run_as_user": "cwagent"
+  },
+  "metrics": {
+    "namespace": "Pokemon/EC2",
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}"
+    },
+    "aggregation_dimensions": [
+      [
+        "InstanceId"
+      ]
+    ],
+    "metrics_collected": {
+      "cpu": {
+        "measurement": [
+          "cpu_usage_active",
+          "cpu_usage_iowait"
+        ],
+        "totalcpu": true
+      },
+      "mem": {
+        "measurement": [
+          "mem_used_percent",
+          "mem_available"
+        ]
+      },
+      "disk": {
+        "measurement": [
+          "used_percent"
+        ],
+        "resources": [
+          "/"
+        ],
+        "drop_device": true
+      }
+    }
+  }
+}
